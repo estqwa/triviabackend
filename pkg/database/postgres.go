@@ -76,31 +76,15 @@ func MigrateDB(db *gorm.DB) error {
 
 	// Применяем миграции "вверх"
 	log.Println("Применяем миграции 'up'...")
-	if err := m.Up(); err != nil && !errors.Is(err, migrateV4.ErrNoChange) {
+	err = m.Up()
+	if err != nil && !errors.Is(err, migrateV4.ErrNoChange) {
 		// Если ошибка НЕ "нет изменений", то это реальная проблема
 		log.Printf("Ошибка применения миграций: %v", err)
-		// Попробуем получить ошибку источника и базы данных для более детальной информации
-		sourceErr, dbErr := m.Close()
-		if sourceErr != nil {
-			log.Printf("Ошибка при закрытии источника миграций: %v", sourceErr)
-		}
-		if dbErr != nil {
-			log.Printf("Ошибка при закрытии подключения к БД в migrate: %v", dbErr)
-		}
 		return fmt.Errorf("ошибка применения миграций 'up': %w", err)
 	} else if errors.Is(err, migrateV4.ErrNoChange) {
 		log.Println("Изменений в миграциях не найдено, база данных уже актуальна.")
 	} else {
 		log.Println("Миграции успешно применены.")
-	}
-
-	// Проверяем ошибки после выполнения миграций (например, грязное состояние)
-	sourceErr, dbErr := m.Close()
-	if sourceErr != nil {
-		return fmt.Errorf("ошибка при закрытии источника миграций после выполнения: %w", sourceErr)
-	}
-	if dbErr != nil {
-		return fmt.Errorf("ошибка при закрытии подключения к БД в migrate после выполнения: %w", dbErr)
 	}
 
 	log.Println("Миграции базы данных завершены.")
