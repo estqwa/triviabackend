@@ -1,0 +1,71 @@
+server:
+  port: "8080"
+  readTimeout: 10
+  writeTimeout: 10
+
+database:
+  host: "postgres"
+  port: "5432"
+  user: "postgres"
+  password: "123456"
+  dbname: "trivia_db"
+  sslmode: "disable"
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+
+jwt:
+  secret: "your_super_secret_key_change_in_production"
+  expirationHrs: 24
+
+auth:
+  sessionLimit: 10  # Максимальное количество активных сессий на пользователя
+  refreshTokenLifetime: 720  # Время жизни refresh-токена в часах (30 дней)
+
+# Настройки WebSocket подсистемы
+websocket:
+  # Настройки шардирования
+  sharding:
+    enabled: true
+    shardCount: 4                   # Количество шардов
+    maxClientsPerShard: 5000        # Максимальное количество клиентов на шард
+    balancingInterval: 30           # Интервал балансировки шардов в секундах
+    loadThresholdPercent: 80        # Порог нагрузки для балансировки (%)
+
+  # Настройки буферов и производительности
+  buffers:
+    clientSendBuffer: 64            # Размер буфера сообщений для клиента
+    broadcastBuffer: 128            # Размер буфера для широковещательных сообщений
+    registerBuffer: 64              # Размер буфера для регистрации клиентов
+    unregisterBuffer: 64            # Размер буфера для отмены регистрации клиентов
+    
+  # Настройки приоритизации сообщений
+  priority:
+    enabled: true
+    highPriorityBuffer: 256         # Буфер для сообщений высокого приоритета
+    normalPriorityBuffer: 128       # Буфер для сообщений обычного приоритета
+    lowPriorityBuffer: 64           # Буфер для сообщений низкого приоритета
+    
+  # Настройки пингов для проверки соединения
+  ping:
+    interval: 30                    # Интервал между пингами в секундах
+    timeout: 10                     # Тайм-аут ожидания понга в секундах
+    
+  # Настройки кластеризации для распределенного режима
+  cluster:
+    enabled: true                   # Включена ли кластеризация
+    instanceID: ""                  # ID экземпляра (автогенерация, если пусто)
+    broadcastChannel: "ws:broadcast" # Канал Redis для широковещательных сообщений
+    directChannel: "ws:direct"      # Канал Redis для прямых сообщений
+    metricsChannel: "ws:metrics"    # Канал Redis для обмена метриками
+    metricsInterval: 60             # Интервал обновления метрик в секундах
+
+  # Настройки для тайм-аутов и ограничений
+  limits:
+    maxMessageSize: 65536           # Максимальный размер сообщения в байтах (64KB)
+    writeWait: 10                   # Тайм-аут записи в секундах
+    pongWait: 60                    # Тайм-аут ожидания понга в секундах
+    maxConnectionsPerIP: 100        # Макс. количество подключений с одного IP
+    cleanupInterval: 300            # Интервал очистки неактивных клиентов в секундах
