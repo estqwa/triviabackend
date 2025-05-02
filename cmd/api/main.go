@@ -103,7 +103,17 @@ func main() {
 	tokenManager.SetAccessTokenExpiry(time.Duration(cfg.JWT.ExpirationHrs) * time.Hour)          // Используем значение из конфига
 	tokenManager.SetRefreshTokenExpiry(time.Duration(cfg.Auth.RefreshTokenLifetime) * time.Hour) // Используем значение из конфига
 	tokenManager.SetMaxRefreshTokensPerUser(cfg.Auth.SessionLimit)                               // Используем значение из конфига
-	tokenManager.SetProductionMode(gin.Mode() == gin.ReleaseMode)                                // Устанавливаем режим для Secure кук
+
+	isProduction := gin.Mode() == gin.ReleaseMode
+	tokenManager.SetProductionMode(isProduction) // Устанавливаем режим для Secure кук
+
+	tokenManager.SetCookieAttributes(
+		"/",                   // Path
+		"",                    // Domain
+		isProduction,          // Secure (true для прода)
+		true,                  // HttpOnly
+		http.SameSiteNoneMode, // Устанавливаем None !!!
+	)
 
 	// Передаем TokenManager в AuthService
 	authService, err := service.NewAuthService(userRepo, jwtService, tokenManager, refreshTokenRepo, invalidTokenRepo)
