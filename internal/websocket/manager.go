@@ -12,6 +12,12 @@ type Event struct {
 	Data interface{} `json:"data"`
 }
 
+// QuizPlayerCountUpdateData содержит обновленное количество игроков для викторины
+type QuizPlayerCountUpdateData struct {
+	QuizID      uint `json:"quiz_id"`
+	PlayerCount int  `json:"player_count"`
+}
+
 // Manager обрабатывает WebSocket сообщения
 type Manager struct {
 	hub            HubInterface

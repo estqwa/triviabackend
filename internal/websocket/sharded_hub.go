@@ -11,6 +11,7 @@ import (
 
 	"github.com/yourusername/trivia-api/internal/config"
 	"github.com/yourusername/trivia-api/internal/domain/repository"
+	"go.uber.org/zap"
 )
 
 // WorkerPool представляет пул воркеров для обработки сообщений
@@ -235,6 +236,14 @@ func NewShardedHub(wsConfig config.WebSocketConfig, provider PubSubProvider, cac
 	workerPool := NewWorkerPool(shardCount * 2)
 	workerPool.Start()
 
+	// Создаем основной логгер для ShardedHub (можно сделать более конфигурируемым)
+	logger, err := zap.NewProduction() // или zap.NewDevelopment() для отладки
+	if err != nil {
+		log.Fatalf("can't initialize zap logger for ShardedHub: %v", err)
+	}
+	defer logger.Sync() // flushes buffer, if any
+	hubLogger := logger.With(zap.String("component", "ShardedHub"))
+
 	hub := &ShardedHub{
 		shardCount:         shardCount,
 		maxClientsPerShard: maxClientsPerShard,
@@ -267,7 +276,7 @@ func NewShardedHub(wsConfig config.WebSocketConfig, provider PubSubProvider, cac
 			log.Printf("[ShardedHub] Используется таймаут неактивности по умолчанию: %v", inactivityTimeout)
 		}
 
-		hub.shards[i] = NewShard(i, hub, maxClientsPerShard, cleanupInterval, inactivityTimeout, hub.cacheRepo)
+		hub.shards[i] = NewShard(i, hub, maxClientsPerShard, cleanupInterval, inactivityTimeout, hub.cacheRepo, hubLogger.With(zap.Int("shardID", i))) // Передаем логгер в шард
 		// Запускаем каждый шард в отдельной горутине
 		go hub.shards[i].Run()
 	}

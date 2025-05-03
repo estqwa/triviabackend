@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yourusername/trivia-api/internal/domain/repository"
+	"go.uber.org/zap"
 )
 
 // ClientStore - определяем интерфейс здесь, если файл interfaces.go не создался
@@ -43,6 +44,9 @@ type Shard struct {
 
 	// Добавляем зависимость для проверки Redis
 	cacheRepo repository.CacheRepository
+
+	// Добавляем логгер
+	logger *zap.Logger
 }
 
 // ShardMetrics содержит метрики для отдельного шарда
@@ -58,9 +62,19 @@ type ShardMetrics struct {
 }
 
 // NewShard создает новый шард
-func NewShard(id int, parent interface{}, maxClients int, cleanupInterval time.Duration, inactivityTimeout time.Duration, cacheRepo repository.CacheRepository) *Shard {
+func NewShard(id int, parent interface{}, maxClients int, cleanupInterval time.Duration, inactivityTimeout time.Duration, cacheRepo repository.CacheRepository, logger *zap.Logger) *Shard {
 	if maxClients <= 0 {
 		maxClients = 2000 // Значение по умолчанию
+	}
+
+	// Если логгер не передан, создаем стандартный
+	if logger == nil {
+		var err error
+		logger, err = zap.NewProduction() // или zap.NewDevelopment() для отладки
+		if err != nil {
+			log.Fatalf("can't initialize zap logger: %v", err)
+		}
+		logger.Info("Using default zap logger for shard", zap.Int("shardID", id))
 	}
 
 	shard := &Shard{
@@ -79,6 +93,7 @@ func NewShard(id int, parent interface{}, maxClients int, cleanupInterval time.D
 		cleanupInterval:   cleanupInterval,
 		inactivityTimeout: inactivityTimeout,
 		cacheRepo:         cacheRepo, // Сохраняем репозиторий кэша
+		logger:            logger,    // Сохраняем логгер
 	}
 
 	// Запускаем горутину для периодической очистки
@@ -319,8 +334,8 @@ func (s *Shard) SubscribeToQuiz(client *Client, quizID uint) {
 		s.unsubscribeInternal(client, oldQuizID)
 	}
 
-	// Подписываем на новую викторину
-	// client.SetQuizID(quizID) // Уже установлено в хендлере, не будем дублировать
+	client.SetQuizID(quizID) // Устанавливаем ID викторины клиенту
+	s.logger.Info("Client subscribed to quiz", zap.String("userID", client.UserID), zap.Uint("quizID", quizID), zap.Int("shardID", s.id))
 
 	// Добавляем клиента в карту подписчиков викторины
 	log.Printf("[Shard %d][Sub] Client %s: Attempting LoadOrStore for quiz map %d", s.id, client.UserID, quizID) // НОВЫЙ ЛОГ - Перед LoadOrStore
@@ -353,6 +368,9 @@ func (s *Shard) SubscribeToQuiz(client *Client, quizID uint) {
 	} else {
 		log.Printf("[Shard %d][Sub] Client %s FAILED VERIFICATION in map for Quiz %d immediately after Store!", s.id, client.UserID, quizID) // НОВЫЙ ЛОГ - Верификация FAILED
 	}
+
+	// Отправляем обновление счетчика игроков ПОСЛЕ подписки
+	s.triggerPlayerCountUpdate(quizID)
 }
 
 // UnsubscribeFromQuiz отписывает клиента от текущей викторины
@@ -362,6 +380,9 @@ func (s *Shard) UnsubscribeFromQuiz(client *Client) {
 		s.unsubscribeInternal(client, quizID)
 		client.ClearQuizID() // Сбрасываем ID викторины у клиента
 		log.Printf("Shard %d: Client %s unsubscribed from Quiz %d", s.id, client.UserID, quizID)
+
+		// Отправляем обновление счетчика игроков ПОСЛЕ отписки
+		s.triggerPlayerCountUpdate(quizID)
 	}
 }
 
@@ -392,6 +413,9 @@ func (s *Shard) unsubscribeInternal(client *Client, quizID uint) {
 	} else {
 		log.Printf("[Shard %d][Unsub] Client %s: No map found for Quiz %d during unsubscribe.", s.id, client.UserID, quizID) // НОВЫЙ ЛОГ
 	}
+
+	// Отправляем обновление счетчика игроков ПОСЛЕ отписки
+	s.triggerPlayerCountUpdate(quizID)
 }
 
 // BroadcastToQuiz отправляет сообщение только тем клиентам шарда,
@@ -727,4 +751,51 @@ func (s *Shard) getActiveSubscribersForQuiz(quizID uint) ([]uint, error) {
 	// --- Конец исправления ---
 
 	return activeSubscribers, nil
+}
+
+// triggerPlayerCountUpdate запрашивает у ShardedHub общее количество подписчиков
+// викторины и инициирует отправку события 'quiz:player_count_update'.
+func (s *Shard) triggerPlayerCountUpdate(quizID uint) {
+	// Получаем ссылку на родительский ShardedHub.
+	parentHub, ok := s.parent.(*ShardedHub)
+	if !ok {
+		// Эта ситуация не должна происходить в нормальной работе.
+		s.logger.Error("CRITICAL: Не удалось привести parent к *ShardedHub для обновления счетчика игроков", zap.Uint("quizID", quizID), zap.Int("shardID", s.id))
+		return
+	}
+
+	// Получаем актуальный список ID подписчиков со ВСЕХ шардов.
+	subscriberIDs, err := parentHub.GetActiveSubscribers(quizID)
+	if err != nil {
+		// Логируем ошибку, но не останавливаем шард.
+		s.logger.Warn("Не удалось получить подписчиков для викторины при обновлении счетчика", zap.Uint("quizID", quizID), zap.Error(err), zap.Int("shardID", s.id))
+		return // Не отправляем обновление, если не можем получить точное количество.
+	}
+	// Рассчитываем общее количество игроков.
+	playerCount := len(subscriberIDs)
+
+	// Формируем структуру данных для события.
+	eventData := QuizPlayerCountUpdateData{
+		QuizID:      quizID,
+		PlayerCount: playerCount,
+	}
+	// Создаем стандартную структуру сообщения Event (из internal/websocket/manager.go).
+	fullEvent := Event{
+		Type: "quiz:player_count_update",
+		Data: eventData,
+	}
+
+	// Маршалим все событие в JSON. Это делается один раз перед рассылкой.
+	messageBytes, err := json.Marshal(fullEvent)
+	if err != nil {
+		s.logger.Error("CRITICAL: Ошибка json.Marshal события quiz:player_count_update", zap.Uint("quizID", quizID), zap.Error(err), zap.Int("shardID", s.id))
+		return
+	}
+
+	s.logger.Info("Инициирую рассылку события quiz:player_count_update", zap.Uint("quizID", quizID), zap.Int("playerCount", playerCount), zap.Int("shardID", s.id))
+
+	// Вызываем метод родительского хаба для отправки готовых байтов
+	// всем подписчикам этой викторины во всех шардах.
+	// Используем ShardedHub.BroadcastToQuiz, который принимает []byte.
+	parentHub.BroadcastToQuiz(quizID, messageBytes)
 }
