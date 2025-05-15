@@ -17,8 +17,10 @@ redis:
   db: 0
 
 jwt:
-  secret: "your_super_secret_key_change_in_production"
   expirationHrs: 24
+  wsTicketExpirySec: 60 # Например, 60 секунд
+  cleanup_interval: "1h" # Например, 1 час
+  # db_jwt_key_encryption_key: "НЕ УКАЗЫВАТЬ ЗДЕСЬ - ТОЛЬКО ЧЕРЕЗ ENV"
 
 auth:
   sessionLimit: 10  # Максимальное количество активных сессий на пользователя

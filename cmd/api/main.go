@@ -82,38 +82,96 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Инициализируем репозиторий для JWT ключей
+	jwtKeyRepo, err := pgRepo.NewPostgresJWTKeyRepository(db, cfg.JWT.DBJWTKeyEncryptionKey)
+	if err != nil {
+		log.Printf("Failed to initialize JWTKeyRepository: %v", err)
+		os.Exit(1)
+	}
+
 	// --- Инициализация конфигурации для QuizManager ---
-	// Создаем конфиг для компонентов викторины
-	// TODO: В будущем можно обогатить этот конфиг значениями из основного cfg
 	quizConfig := quizmanager.DefaultConfig()
 
-	// Создаем JWT сервис с поддержкой персистентного хранения инвалидированных токенов
-	jwtService, err := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.ExpirationHrs, invalidTokenRepo, cfg.JWT.WSTicketExpirySec, cfg.JWT.CleanupInterval)
+	// --- Инициализация TokenManager и JWTService ---
+
+	// 1. Создаем TokenManager
+	tokenManager, err := manager.NewTokenManager(refreshTokenRepo, userRepo, jwtKeyRepo)
+	if err != nil {
+		log.Printf("Failed to initialize TokenManager: %v", err)
+		os.Exit(1)
+	}
+	// Устанавливаем параметры TokenManager из конфигурации
+	tokenManager.SetAccessTokenExpiry(time.Duration(cfg.JWT.ExpirationHrs) * time.Hour)
+	tokenManager.SetRefreshTokenExpiry(time.Duration(cfg.Auth.RefreshTokenLifetime) * time.Hour)
+	tokenManager.SetMaxRefreshTokensPerUser(cfg.Auth.SessionLimit)
+
+	isProduction := gin.Mode() == gin.ReleaseMode
+	tokenManager.SetProductionMode(isProduction) // Устанавливаем режим для Secure кук
+
+	// ВНИМАНИЕ: SameSiteNoneMode требует Secure=true. Убедитесь, что isProduction устанавливается корректно.
+	// Для локальной разработки без HTTPS, SameSiteLaxMode или SameSiteDefaultMode может быть более подходящим.
+	// Если isProduction=false (HTTP), SameSite=None не будет работать корректно в большинстве браузеров.
+	sameSitePolicy := http.SameSiteLaxMode // По умолчанию Lax
+	if isProduction {
+		sameSitePolicy = http.SameSiteNoneMode // None только для HTTPS
+	}
+	tokenManager.SetCookieAttributes(
+		"/",            // Path
+		"",             // Domain
+		isProduction,   // Secure (true для прода)
+		true,           // HttpOnly
+		sameSitePolicy, // Используем вычисленную политику
+	)
+
+	// Создаем контекст с отменой для корректного завершения работы горутин
+	// Этот контекст будет использоваться для управления жизненным циклом горутин в сервисах
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// --- Инициализация WebSocket (PubSubProvider создается здесь) ---
+	var wsHub ws.HubInterface
+	var pubSubProvider ws.PubSubProvider = &ws.NoOpPubSub{} // Провайдер по умолчанию
+
+	// Создаем PubSubProvider только если кластеризация включена
+	if cfg.WebSocket.Cluster.Enabled {
+		log.Println("Инициализация Redis PubSub для кластеризации WebSocket...")
+		redisPubSubClient, errPubSub := database.NewUniversalRedisClient(cfg.Redis)
+		if errPubSub != nil {
+			log.Printf("Ошибка при инициализации Redis клиента для PubSub: %v. Кластеризация WS будет неактивна.", errPubSub)
+			pubSubProvider = &ws.NoOpPubSub{}
+		} else {
+			redisProvider, errProv := ws.NewRedisPubSub(redisPubSubClient)
+			if errProv != nil {
+				log.Printf("Ошибка при создании Redis PubSub провайдера: %v. Кластеризация WS будет неактивна.", errProv)
+				redisPubSubClient.Close()
+				pubSubProvider = &ws.NoOpPubSub{}
+			} else {
+				log.Println("Redis PubSub провайдер успешно инициализирован")
+				pubSubProvider = redisProvider
+			}
+		}
+	}
+	// --- Конец инициализации WebSocket ---
+
+	// 2. Создаем JWTService, передавая ему tokenManager как KeyProvider, pubSubProvider и ctx
+	jwtService, err := auth.NewJWTService(
+		cfg.JWT.ExpirationHrs,
+		invalidTokenRepo,
+		cfg.JWT.WSTicketExpirySec,
+		cfg.JWT.CleanupInterval,
+		tokenManager,   // tokenManager реализует KeyProvider
+		pubSubProvider, // <<< ПЕРЕДАЕМ СЮДА
+		ctx,            // <<< ПЕРЕДАЕМ СЮДА КОРНЕВОЙ КОНТЕКСТ ПРИЛОЖЕНИЯ
+	)
 	if err != nil {
 		log.Printf("Failed to initialize JWTService: %v", err)
 		os.Exit(1)
 	}
 
-	// Создаем TokenManager
-	tokenManager, err := manager.NewTokenManager(jwtService, refreshTokenRepo, userRepo)
-	if err != nil {
-		log.Printf("Failed to initialize TokenManager: %v", err)
-		os.Exit(1)
-	}
-	tokenManager.SetAccessTokenExpiry(time.Duration(cfg.JWT.ExpirationHrs) * time.Hour)          // Используем значение из конфига
-	tokenManager.SetRefreshTokenExpiry(time.Duration(cfg.Auth.RefreshTokenLifetime) * time.Hour) // Используем значение из конфига
-	tokenManager.SetMaxRefreshTokensPerUser(cfg.Auth.SessionLimit)                               // Используем значение из конфига
+	// 3. Устанавливаем jwtService в tokenManager
+	tokenManager.SetJWTService(jwtService)
 
-	isProduction := gin.Mode() == gin.ReleaseMode
-	tokenManager.SetProductionMode(isProduction) // Устанавливаем режим для Secure кук
-
-	tokenManager.SetCookieAttributes(
-		"/",                   // Path
-		"",                    // Domain
-		isProduction,          // Secure (true для прода)
-		true,                  // HttpOnly
-		http.SameSiteNoneMode, // Устанавливаем None !!!
-	)
+	// --- Конец измененной инициализации TokenManager и JWTService ---
 
 	// Передаем TokenManager в AuthService
 	authService, err := service.NewAuthService(userRepo, jwtService, tokenManager, refreshTokenRepo, invalidTokenRepo)
@@ -122,16 +180,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Создаем контекст с отменой для корректного завершения работы горутин
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// Запускаем фоновую задачу для очистки истекших CSRF токенов и других ресурсов
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 
-		log.Println("Запуск механизма периодической очистки CSRF токенов (каждый час)")
+		log.Println("Запуск механизма периодической очистки CSRF токенов и истекших refresh-токенов (каждый час)")
 
 		for {
 			select {
@@ -149,32 +203,32 @@ func main() {
 		}
 	}()
 
-	// --- Инициализация WebSocket --- //
-	var wsHub ws.HubInterface
-	var pubSubProvider ws.PubSubProvider = &ws.NoOpPubSub{} // Провайдер по умолчанию
+	// --- Инициализация WebSocket ---
+	// var wsHub ws.HubInterface // УДАЛЯЕМ ЭТУ СТРОКУ, ТАК КАК wsHub УЖЕ ОПРЕДЕЛЕН ВЫШЕ
+	// var pubSubProvider ws.PubSubProvider = &ws.NoOpPubSub{} // УДАЛЯЕМ ЭТУ СТРОКУ, ТАК КАК pubSubProvider УЖЕ ОПРЕДЕЛЕН ВЫШЕ
 
 	// Создаем PubSubProvider только если кластеризация включена
-	if cfg.WebSocket.Cluster.Enabled {
-		log.Println("Инициализация Redis PubSub для кластеризации WebSocket...")
-		// Создаем КЛИЕНТ Redis PubSub с использованием той же универсальной функции
-		redisPubSubClient, errPubSub := database.NewUniversalRedisClient(cfg.Redis) // Используем отдельную переменную для ошибки
-		if errPubSub != nil {
-			log.Printf("Ошибка при инициализации Redis клиента для PubSub: %v. Кластеризация WS будет неактивна.", errPubSub)
-			// Используем NoOpPubSub если не удалось подключиться к Redis
-			pubSubProvider = &ws.NoOpPubSub{}
-		} else {
-			// Создаем провайдер Redis PubSub, передавая ему созданный клиент
-			redisProvider, errProv := ws.NewRedisPubSub(redisPubSubClient)
-			if errProv != nil {
-				log.Printf("Ошибка при создании Redis PubSub провайдера: %v. Кластеризация WS будет неактивна.", errProv)
-				redisPubSubClient.Close() // Закрываем созданный клиент, так как он не будет использоваться
-				pubSubProvider = &ws.NoOpPubSub{}
-			} else {
-				log.Println("Redis PubSub провайдер успешно инициализирован")
-				pubSubProvider = redisProvider
-			}
-		}
-	}
+	// if cfg.WebSocket.Cluster.Enabled { // УДАЛЯЕМ ВЕСЬ ЭТОТ БЛОК, ТАК КАК ОН УЖЕ ЕСТЬ ВЫШЕ
+	// 	log.Println("Инициализация Redis PubSub для кластеризации WebSocket...")
+	// 	// Создаем КЛИЕНТ Redis PubSub с использованием той же универсальной функции
+	// 	redisPubSubClient, errPubSub := database.NewUniversalRedisClient(cfg.Redis) // Используем отдельную переменную для ошибки
+	// 	if errPubSub != nil {
+	// 		log.Printf("Ошибка при инициализации Redis клиента для PubSub: %v. Кластеризация WS будет неактивна.", errPubSub)
+	// 		// Используем NoOpPubSub если не удалось подключиться к Redis
+	// 		pubSubProvider = &ws.NoOpPubSub{}
+	// 	} else {
+	// 		// Создаем провайдер Redis PubSub, передавая ему созданный клиент
+	// 		redisProvider, errProv := ws.NewRedisPubSub(redisPubSubClient)
+	// 		if errProv != nil {
+	// 			log.Printf("Ошибка при создании Redis PubSub провайдера: %v. Кластеризация WS будет неактивна.", errProv)
+	// 			redisPubSubClient.Close() // Закрываем созданный клиент, так как он не будет использоваться
+	// 			pubSubProvider = &ws.NoOpPubSub{}
+	// 		} else {
+	// 			log.Println("Redis PubSub провайдер успешно инициализирован")
+	// 			pubSubProvider = redisProvider
+	// 		}
+	// 	}
+	// } // КОНЕЦ УДАЛЯЕМОГО БЛОКА
 
 	if cfg.WebSocket.Sharding.Enabled {
 		log.Println("WebSocket: включено шардирование")
@@ -190,12 +244,12 @@ func main() {
 	quizService := service.NewQuizService(quizRepo, questionRepo, cacheRepo, quizConfig, db)
 	resultService := service.NewResultService(resultRepo, userRepo, quizRepo, questionRepo, cacheRepo, db, wsManager, quizConfig)
 	userService := service.NewUserService(userRepo)
-	quizManager := service.NewQuizManager(quizRepo, questionRepo, resultRepo, resultService, cacheRepo, wsManager, db)
+	quizManagerService := service.NewQuizManager(quizRepo, questionRepo, resultRepo, resultService, cacheRepo, wsManager, db)
 
 	// Инициализируем обработчики
 	authHandler := handler.NewAuthHandler(authService, tokenManager, wsHub)
-	quizHandler := handler.NewQuizHandler(quizService, resultService, quizManager)
-	wsHandler := handler.NewWSHandler(wsHub, wsManager, quizManager, jwtService)
+	quizHandler := handler.NewQuizHandler(quizService, resultService, quizManagerService)
+	wsHandler := handler.NewWSHandler(wsHub, wsManager, quizManagerService, jwtService)
 	userHandler := handler.NewUserHandler(userService)
 
 	// Инициализируем middleware
@@ -283,7 +337,7 @@ func main() {
 			quizWithID.Use(middleware.ExtractUintParam("id", "quizID")) // Применяем middleware
 			{
 				quizWithID.GET("", quizHandler.GetQuiz)
-				quizWithID.GET("/with-questions", quizHandler.GetQuizWithQuestions)
+				quizzes.GET("/with-questions", quizHandler.GetQuizWithQuestions)
 				quizWithID.GET("/results", quizHandler.GetQuizResults)
 
 				// Маршруты для аутентифицированных пользователей
@@ -328,7 +382,7 @@ func main() {
 		}
 
 		for _, quiz := range scheduledQuizzes {
-			if err := quizManager.ScheduleQuiz(quiz.ID, quiz.ScheduledTime); err != nil {
+			if err := quizManagerService.ScheduleQuiz(quiz.ID, quiz.ScheduledTime); err != nil {
 				log.Printf("Failed to reschedule quiz %d: %v", quiz.ID, err)
 			}
 		}

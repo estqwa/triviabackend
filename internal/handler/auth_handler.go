@@ -137,6 +137,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		// Можно вернуть ошибку или продолжить без refresh cookie
 	}
 	h.tokenManager.SetAccessTokenCookie(c.Writer, tokenResp.AccessToken)
+	h.tokenManager.SetCSRFSecretCookie(c.Writer, tokenResp.CSRFSecret)
 
 	// Возвращаем только необходимые данные в JSON
 	c.JSON(http.StatusCreated, gin.H{
@@ -760,6 +761,7 @@ func (h *AuthHandler) GetSessionLimit(c *gin.Context) {
 }
 
 // UpdateSessionLimit обновляет лимит сессий для пользователя (админ-функция)
+// Больше не поддерживается через API. Управляется через конфигурационный файл.
 func (h *AuthHandler) UpdateSessionLimit(c *gin.Context) {
 	// Проверяем права администратора
 	isAdmin, exists := c.Get("is_admin")
@@ -768,35 +770,10 @@ func (h *AuthHandler) UpdateSessionLimit(c *gin.Context) {
 		return
 	}
 
-	// Получаем новый лимит из запроса
-	var req struct {
-		Limit int `json:"limit" binding:"required,min=1,max=100"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректные данные запроса", "error_type": "invalid_request"})
-		return
-	}
-
-	// Обновляем лимит в TokenManager
-	if h.tokenManager != nil {
-		h.tokenManager.SetMaxRefreshTokensPerUser(req.Limit)
-	}
-
-	// Отправляем WebSocket уведомление всем пользователям
-	if h.wsHub != nil {
-		event := map[string]interface{}{
-			"event":     "session_limit_updated",
-			"limit":     req.Limit,
-			"timestamp": time.Now().Format(time.RFC3339),
-		}
-
-		// Отправляем всем пользователям (админам) с использованием правильного метода
-		h.wsHub.BroadcastJSON(event)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Лимит сессий успешно обновлен",
-		"limit":   req.Limit,
+	log.Printf("[AuthHandler] Попытка вызова UpdateSessionLimit администратором ID=%d. Этот функционал управляется конфигурацией.", c.MustGet("user_id").(uint))
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"message":    "Обновление лимита сессий через API больше не поддерживается. Этот параметр управляется конфигурационным файлом.",
+		"error_type": "not_implemented",
 	})
 }
 

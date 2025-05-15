@@ -5,13 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
+
+	"encoding/json"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/yourusername/trivia-api/internal/domain/entity"
 	"github.com/yourusername/trivia-api/internal/domain/repository"
+	"github.com/yourusername/trivia-api/internal/websocket"
 )
+
+// Определим интерфейс KeyProvider, который TokenManager должен будет реализовать
+// Это позволит избежать прямой зависимости JWTService от TokenManager
+type KeyProvider interface {
+	GetCurrentSigningKey(ctx context.Context) (*entity.JWTKey, error)
+	GetKeysForValidation(ctx context.Context) (map[string]string, error)
+}
 
 // JWTCustomClaims содержит пользовательские поля для токена
 type JWTCustomClaims struct {
@@ -27,7 +38,6 @@ type JWTCustomClaims struct {
 
 // JWTService предоставляет методы для работы с JWT
 type JWTService struct {
-	secretKey     string
 	expirationHrs int
 	// Черный список для инвалидированных пользователей (in-memory)
 	invalidatedUsers map[uint]time.Time
@@ -39,17 +49,32 @@ type JWTService struct {
 	wsTicketExpiry time.Duration
 	// Интервал для очистки кеша
 	cleanupInterval time.Duration
+	keyProvider     KeyProvider // Добавлено: зависимость от провайдера ключей
+	pubSubProvider  websocket.PubSubProvider
+	appCtx          context.Context
 }
 
 // NewJWTService создает новый сервис JWT и возвращает ошибку при проблемах
-func NewJWTService(secretKey string, expirationHrs int, invalidTokenRepo repository.InvalidTokenRepository, wsTicketExpirySec int, cleanupInterval time.Duration) (*JWTService, error) {
-	if secretKey == "" {
-		// log.Fatal("JWT secret key is required")
-		return nil, fmt.Errorf("JWT secret key is required for JWTService")
-	}
+func NewJWTService(
+	expirationHrs int,
+	invalidTokenRepo repository.InvalidTokenRepository,
+	wsTicketExpirySec int,
+	cleanupInterval time.Duration,
+	keyProvider KeyProvider, // Добавлен параметр KeyProvider
+	pubSubProvider websocket.PubSubProvider,
+	appCtx context.Context,
+) (*JWTService, error) {
 	if invalidTokenRepo == nil {
-		// log.Fatal("InvalidTokenRepository is required for JWTService")
 		return nil, fmt.Errorf("InvalidTokenRepository is required for JWTService")
+	}
+	if keyProvider == nil {
+		return nil, fmt.Errorf("KeyProvider is required for JWTService")
+	}
+	if pubSubProvider == nil {
+		return nil, fmt.Errorf("PubSubProvider is required for JWTService")
+	}
+	if appCtx == nil {
+		return nil, fmt.Errorf("appCtx is required for JWTService")
 	}
 	// Default expiry if not set or invalid
 	if expirationHrs <= 0 {
@@ -65,12 +90,14 @@ func NewJWTService(secretKey string, expirationHrs int, invalidTokenRepo reposit
 	}
 
 	service := &JWTService{
-		secretKey:        secretKey,
 		expirationHrs:    expirationHrs,
 		invalidatedUsers: make(map[uint]time.Time),
 		invalidTokenRepo: invalidTokenRepo,
 		wsTicketExpiry:   wsExpiry, // Store configured WS ticket expiry
 		cleanupInterval:  cleanupInterval,
+		keyProvider:      keyProvider, // Сохраняем keyProvider
+		pubSubProvider:   pubSubProvider,
+		appCtx:           appCtx,
 	}
 
 	// Создаем контекст для загрузки из БД при старте
@@ -82,6 +109,9 @@ func NewJWTService(secretKey string, expirationHrs int, invalidTokenRepo reposit
 
 	// Запускаем периодическую очистку кеша
 	go service.runCleanupRoutine()
+
+	// Запускаем прослушивание событий инвалидации из Pub/Sub
+	go service.listenForInvalidationEvents()
 
 	return service, nil // Возвращаем сервис и nil ошибку при успехе
 }
@@ -110,10 +140,17 @@ func (s *JWTService) loadInvalidatedTokensFromDB(ctx context.Context) {
 	log.Printf("JWT: Loaded %d invalidated tokens from database", len(tokens))
 }
 
-// GenerateToken создает новый JWT токен для пользователя
-// Теперь принимает csrfSecret для включения в клеймы
-func (s *JWTService) GenerateToken(user *entity.User, csrfSecret string) (string, error) {
-	// Проверка: CSRF секрет не должен быть пустым для стандартных токенов
+// GenerateTokenWithKey создает новый JWT токен для пользователя, используя предоставленный ключ.
+func (s *JWTService) GenerateTokenWithKey(user *entity.User, csrfSecret string, signingKey *entity.JWTKey) (string, error) {
+	if signingKey == nil || signingKey.Key == "" || signingKey.ID == "" {
+		return "", errors.New("invalid signing key provided for token generation")
+	}
+	// Убедимся, что используется поддерживаемый алгоритм
+	signingMethod := jwt.GetSigningMethod(signingKey.Algorithm)
+	if signingMethod == nil {
+		return "", fmt.Errorf("unsupported signing algorithm specified in key: %s", signingKey.Algorithm)
+	}
+
 	if csrfSecret == "" {
 		// Это не должно происходить при обычном потоке генерации токена доступа,
 		// так как TokenManager должен генерировать секрет.
@@ -130,34 +167,71 @@ func (s *JWTService) GenerateToken(user *entity.User, csrfSecret string) (string
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(s.expirationHrs))),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "trivia-api", // Добавим издателя
+			Subject:   fmt.Sprintf("%d", user.ID),
+			Audience:  jwt.ClaimStrings{"trivia-user"}, // Пример аудитории
 		},
 		// Usage не устанавливаем, т.к. это стандартный токен доступа
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.secretKey))
+	token := jwt.NewWithClaims(signingMethod, claims)
+	// Добавляем Key ID (kid) в заголовок токена
+	token.Header["kid"] = signingKey.ID
+
+	// Подписываем токен, используя секрет из переданного ключа
+	tokenString, err := token.SignedString([]byte(signingKey.Key))
 	if err != nil {
-		log.Printf("[JWT] Ошибка генерации токена для пользователя ID=%d: %v", user.ID, err)
+		log.Printf("[JWT] Ошибка генерации токена для пользователя ID=%d с ключом ID=%s: %v", user.ID, signingKey.ID, err)
 		return "", err
 	}
 
 	// Не логируем CSRFSecret
-	log.Printf("[JWT] Токен доступа успешно сгенерирован для пользователя ID=%d, выдан в %v, истекает через %d часов",
-		user.ID, claims.IssuedAt.Time, s.expirationHrs)
+	log.Printf("[JWT] Токен доступа успешно сгенерирован для пользователя ID=%d с ключом ID=%s",
+		user.ID, signingKey.ID)
 	return tokenString, nil
 }
 
-// ParseToken проверяет и расшифровывает JWT токен
-// Добавлен context.Context для вызова репозитория
+// ParseToken проверяет и расшифровывает JWT токен, используя ключи от KeyProvider.
 func (s *JWTService) ParseToken(ctx context.Context, tokenString string) (*JWTCustomClaims, error) {
 	claims := &JWTCustomClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+
+	// Используем Keyfunc для динамического получения ключа проверки
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		// Получаем Key ID (kid) из заголовка токена
+		kid, ok := token.Header["kid"].(string)
+		if !ok {
+			log.Printf("[JWT] Ошибка: отсутствует 'kid' в заголовке токена")
+			return nil, errors.New("token header missing 'kid' (Key ID)")
+		}
+
+		// Запрашиваем карту валидных ключей у KeyProvider
+		// Используем фоновый контекст, т.к. контекст запроса может быть уже отменен
+		// TODO: Пересмотреть использование контекста здесь
+		validationKeys, keyErr := s.keyProvider.GetKeysForValidation(context.Background())
+		if keyErr != nil {
+			log.Printf("[JWT] Ошибка при получении ключей для валидации: %v", keyErr)
+			return nil, fmt.Errorf("failed to get validation keys: %w", keyErr)
+		}
+
+		// Ищем секрет по kid
+		secret, found := validationKeys[kid]
+		if !found {
+			log.Printf("[JWT] Ошибка: ключ с ID '%s' не найден среди валидных ключей для проверки токена", kid)
+			return nil, fmt.Errorf("validation key with id '%s' not found or inactive", kid)
+		}
+
+		// Проверяем метод подписи токена
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			log.Printf("[JWT] Неожиданный метод подписи: %v", token.Header["alg"])
+			log.Printf("[JWT] Неожиданный метод подписи: %v для kid: %s", token.Header["alg"], kid)
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(s.secretKey), nil
-	})
+
+		// Возвращаем найденный секрет (уже расшифрованный)
+		return []byte(secret), nil
+	}
+
+	// Парсим токен с использованием keyFunc
+	token, err := jwt.ParseWithClaims(tokenString, claims, keyFunc)
 
 	if err != nil {
 		// Более подробное логирование ошибок JWT
@@ -167,14 +241,34 @@ func (s *JWTService) ParseToken(ctx context.Context, tokenString string) (*JWTCu
 				log.Printf("[JWT] Ошибка: Токен имеет неверный формат")
 				return nil, errors.New("token is malformed")
 			case ve.Errors&jwt.ValidationErrorExpired != 0:
-				log.Printf("[JWT] Ошибка: Токен истек срок действия для пользователя ID=%d", claims.UserID)
+				logUserID := uint(0)
+				if claims != nil {
+					logUserID = claims.UserID
+				}
+				log.Printf("[JWT] Ошибка: Токен истек срок действия для пользователя ID=%d", logUserID)
 				return nil, errors.New("token is expired")
 			case ve.Errors&jwt.ValidationErrorNotValidYet != 0:
 				log.Printf("[JWT] Ошибка: Токен еще не действителен")
 				return nil, errors.New("token not valid yet")
 			case ve.Errors&jwt.ValidationErrorSignatureInvalid != 0:
-				log.Printf("[JWT] Ошибка: Неверная подпись токена")
+				logUserID := uint(0)
+				if claims != nil {
+					logUserID = claims.UserID
+				}
+				kid := "unknown"
+				if token != nil && token.Header != nil {
+					if k, ok := token.Header["kid"].(string); ok {
+						kid = k
+					}
+				}
+				log.Printf("[JWT] Ошибка: Неверная подпись токена для пользователя ID=%d (Key ID: %s)", logUserID, kid)
 				return nil, errors.New("signature is invalid")
+			// Добавим обработку ошибки отсутствия ключа (из keyFunc)
+			case errors.Is(ve.Inner, errors.New("token header missing 'kid' (Key ID)")), // Примерные тексты ошибок из keyFunc
+				errors.Is(ve.Inner, fmt.Errorf("validation key with id '' not found or inactive")),
+				strings.Contains(ve.Inner.Error(), "validation key with id"):
+				log.Printf("[JWT] Ошибка валидации: Ключ для проверки не найден или недействителен. %v", ve.Inner)
+				return nil, errors.New("token validation key error")
 			default:
 				log.Printf("[JWT] Ошибка при разборе токена: %v", err)
 				return nil, errors.New("token validation failed")
@@ -208,7 +302,7 @@ func (s *JWTService) ParseToken(ctx context.Context, tokenString string) (*JWTCu
 		if exists {
 			invalidationTime = invTime // Сохраняем время для логирования
 			// Если время выдачи токена НЕ ПОЗЖЕ времени инвалидации, токен недействителен
-			if !claims.IssuedAt.Time.After(invalidationTime) {
+			if claims.IssuedAt != nil && !claims.IssuedAt.Time.After(invalidationTime) {
 				isInvalidInMem = true
 			}
 		}
@@ -219,6 +313,23 @@ func (s *JWTService) ParseToken(ctx context.Context, tokenString string) (*JWTCu
 			claims.UserID, claims.IssuedAt.Time, invalidationTime)
 		return nil, errors.New("token has been invalidated")
 	}
+
+	// Дополнительная проверка через БД (если не нашли в кеше или просто для надежности)
+	// Эту проверку можно сделать опциональной или убрать, если доверяем кешу + Pub/Sub синхронизации
+	// if s.invalidTokenRepo != nil && claims.IssuedAt != nil {
+	//     isInvalidDB, dbErr := s.invalidTokenRepo.IsTokenInvalid(ctx, claims.UserID, claims.IssuedAt.Time)
+	//     if dbErr != nil {
+	//         log.Printf("WARN: Failed to check token invalidation status in DB for user %d: %v", claims.UserID, dbErr)
+	//         // Не прерываем, но логируем
+	//     } else if isInvalidDB {
+	//         log.Printf("[JWT] Токен инвалидирован (DB check) для пользователя ID=%d, выдан в %v", claims.UserID, claims.IssuedAt.Time)
+	//         // Синхронизируем кеш на всякий случай
+	//         // s.mu.Lock()
+	//         // s.invalidatedUsers[claims.UserID] = time.Now() // Примерное время, лучше брать из БД, если возможно
+	//         // s.mu.Unlock()
+	//         return nil, errors.New("token has been invalidated (db)")
+	//     }
+	// }
 
 	log.Printf("[JWT] Токен успешно проверен для пользователя ID=%d, Email=%s, выдан: %v",
 		claims.UserID, claims.Email, claims.IssuedAt.Time)
@@ -242,6 +353,21 @@ func (s *JWTService) InvalidateTokensForUser(ctx context.Context, userID uint) e
 			log.Printf("[JWT] Ошибка при добавлении записи инвалидации в БД для пользователя ID=%d: %v",
 				userID, err)
 			return err
+		}
+	}
+
+	// Публикуем событие инвалидации в Pub/Sub
+	invalidationEvent := map[string]interface{}{"user_id": userID, "invalidation_time": now.Unix()}
+	eventBytes, err := json.Marshal(invalidationEvent)
+	if err != nil {
+		log.Printf("[JWT] Ошибка сериализации события инвалидации для userID %d: %v", userID, err)
+		// Не возвращаем ошибку, чтобы не прерывать основной процесс, но логируем
+	} else {
+		if pubErr := s.pubSubProvider.Publish("jwt_invalidation_events", eventBytes); pubErr != nil {
+			log.Printf("[JWT] Ошибка публикации события инвалидации для userID %d в Pub/Sub: %v", userID, pubErr)
+			// Также не возвращаем ошибку, но логируем
+		} else {
+			log.Printf("[JWT] Событие инвалидации для userID %d опубликовано в Pub/Sub", userID)
 		}
 	}
 
@@ -316,21 +442,22 @@ func (s *JWTService) runCleanupRoutine() {
 	ticker := time.NewTicker(s.cleanupInterval)
 	defer ticker.Stop()
 
-	// Создаем контекст, который можно отменить при необходимости (пока нет Shutdown)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // Хотя cancel пока не вызывается
-
+	// Используем s.appCtx, переданный при инициализации, для управления жизненным циклом
+	// Эта горутина завершится, когда s.appCtx будет отменен.
 	log.Printf("[JWTService] Starting periodic cleanup routine every %v", s.cleanupInterval)
 
 	for {
 		select {
 		case <-ticker.C:
 			log.Printf("[JWTService] Running periodic cleanup...")
-			if err := s.CleanupInvalidatedUsers(context.Background()); err != nil {
+			// Используем новый контекст для самой операции очистки, если нужно ограничить ее по времени
+			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), s.cleanupInterval/2)
+			if err := s.CleanupInvalidatedUsers(cleanupCtx); err != nil {
 				log.Printf("[JWTService] Error during periodic cleanup: %v", err)
 			}
-		case <-ctx.Done():
-			log.Printf("[JWTService] Cleanup routine stopped.")
+			cancelCleanup()
+		case <-s.appCtx.Done(): // Слушаем отмену основного контекста приложения
+			log.Printf("[JWTService] Cleanup routine stopped due to app context cancellation.")
 			return
 		}
 	}
@@ -377,17 +504,33 @@ func (s *JWTService) DebugToken(tokenString string) map[string]interface{} {
 }
 
 // ParseWSTicket проверяет JWT, используемый как WS тикет
+// Обновлено: использует Keyfunc для проверки подписи
 func (s *JWTService) ParseWSTicket(ticketString string) (*JWTCustomClaims, error) {
 	claims := &JWTCustomClaims{}
-	token, err := jwt.ParseWithClaims(ticketString, claims, func(token *jwt.Token) (interface{}, error) {
+
+	// Используем ту же Keyfunc, что и в ParseToken
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		kid, ok := token.Header["kid"].(string)
+		if !ok {
+			return nil, errors.New("ticket header missing 'kid' (Key ID)")
+		}
+		validationKeys, keyErr := s.keyProvider.GetKeysForValidation(context.Background())
+		if keyErr != nil {
+			return nil, fmt.Errorf("failed to get validation keys: %w", keyErr)
+		}
+		secret, found := validationKeys[kid]
+		if !found {
+			return nil, fmt.Errorf("validation key with id '%s' not found or inactive", kid)
+		}
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(s.secretKey), nil
-	})
+		return []byte(secret), nil
+	}
+
+	token, err := jwt.ParseWithClaims(ticketString, claims, keyFunc)
 
 	if err != nil {
-		// Обработка ошибок валидации
 		if ve, ok := err.(*jwt.ValidationError); ok {
 			if ve.Errors&jwt.ValidationErrorExpired != 0 {
 				return nil, errors.New("ticket is expired")
@@ -400,24 +543,32 @@ func (s *JWTService) ParseWSTicket(ticketString string) (*JWTCustomClaims, error
 		return nil, errors.New("invalid ticket")
 	}
 
-	// Проверяем claim 'usage'
 	if claims.Usage != "websocket_auth" {
 		return nil, errors.New("invalid ticket usage")
 	}
 
-	// Дополнительная проверка: WS тикет не должен содержать CSRF секрет
 	if claims.CSRFSecret != "" {
 		log.Printf("[JWT] Ошибка: WS-тикет для пользователя ID=%d содержит CSRF секрет", claims.UserID)
 		return nil, errors.New("WS ticket should not contain CSRF secret")
 	}
 
-	// Проверка инвалидации НЕ НУЖНА для WS тикетов
-
 	return claims, nil
 }
 
 // GenerateWSTicket создает короткоживущий JWT для аутентификации WebSocket
+// Обновлено: использует текущий активный ключ для подписи
 func (s *JWTService) GenerateWSTicket(userID uint, email string) (string, error) {
+	// Получаем текущий ключ для подписи
+	signingKey, keyErr := s.keyProvider.GetCurrentSigningKey(context.Background())
+	if keyErr != nil {
+		log.Printf("CRITICAL: Failed to get current signing key for GenerateWSTicket: %v", keyErr)
+		return "", errors.New("failed to get signing key for WS ticket")
+	}
+	signingMethod := jwt.GetSigningMethod(signingKey.Algorithm)
+	if signingMethod == nil {
+		return "", fmt.Errorf("unsupported signing algorithm specified in key: %s", signingKey.Algorithm)
+	}
+
 	claims := &JWTCustomClaims{
 		UserID: userID,
 		Email:  email,
@@ -425,18 +576,23 @@ func (s *JWTService) GenerateWSTicket(userID uint, email string) (string, error)
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.wsTicketExpiry)), // Используем настраиваемое время жизни
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "trivia-api",
+			Subject:   fmt.Sprintf("%d", userID),
+			Audience:  jwt.ClaimStrings{"trivia-ws"}, // Другая аудитория для WS
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.secretKey))
+	token := jwt.NewWithClaims(signingMethod, claims)
+	token.Header["kid"] = signingKey.ID // Добавляем kid
+
+	tokenString, err := token.SignedString([]byte(signingKey.Key))
 	if err != nil {
-		log.Printf("[JWT] Ошибка генерации WS-тикета для пользователя ID=%d: %v", userID, err)
+		log.Printf("[JWT] Ошибка генерации WS-тикета для пользователя ID=%d с ключом ID=%s: %v", userID, signingKey.ID, err)
 		return "", err
 	}
 
-	log.Printf("[JWT] WS-тикет успешно сгенерирован для пользователя ID=%d, истекает через %v",
-		userID, s.wsTicketExpiry)
+	log.Printf("[JWT] WS-тикет успешно сгенерирован для пользователя ID=%d с ключом ID=%s, истекает через %v",
+		userID, signingKey.ID, s.wsTicketExpiry)
 	return tokenString, nil
 }
 
@@ -446,4 +602,60 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// listenForInvalidationEvents подписывается на события инвалидации из Pub/Sub
+// и обновляет локальный кеш.
+func (s *JWTService) listenForInvalidationEvents() {
+	if s.pubSubProvider == nil {
+		log.Println("[JWTService] PubSubProvider не настроен, пропуск прослушивания событий инвалидации.")
+		return
+	}
+
+	// Подписываемся на канал, используя s.appCtx для управления жизненным циклом подписки
+	messages, err := s.pubSubProvider.Subscribe(s.appCtx, "jwt_invalidation_events")
+	if err != nil {
+		log.Printf("[JWTService] Ошибка подписки на канал jwt_invalidation_events: %v", err)
+		return // Если не удалось подписаться, нет смысла продолжать
+	}
+
+	log.Println("[JWTService] Успешно подписан на канал jwt_invalidation_events для синхронизации кэша.")
+
+	for {
+		select {
+		case <-s.appCtx.Done():
+			log.Println("[JWTService] Остановка прослушивания событий инвалидации из-за отмены контекста приложения.")
+			// PubSubProvider.Close() или отписка будет обработана внешне или через контекст в Subscribe
+			return
+		case msgBytes, ok := <-messages:
+			if !ok {
+				log.Println("[JWTService] Канал сообщений Pub/Sub jwt_invalidation_events был закрыт.")
+				return // Канал закрыт, выходим
+			}
+
+			var eventData struct {
+				UserID           uint  `json:"user_id"`
+				InvalidationTime int64 `json:"invalidation_time"` // Ожидаем Unix timestamp
+			}
+
+			if err := json.Unmarshal(msgBytes, &eventData); err != nil {
+				log.Printf("[JWTService] Ошибка десериализации сообщения из Pub/Sub: %v. Сообщение: %s", err, string(msgBytes))
+				continue // Пропускаем некорректное сообщение
+			}
+
+			if eventData.UserID == 0 {
+				log.Printf("[JWTService] Получено событие инвалидации с некорректным UserID: %d", eventData.UserID)
+				continue
+			}
+
+			// Обновляем локальный кеш
+			s.mu.Lock()
+			// Если уже есть более свежая запись об инвалидации, не перезаписываем
+			// или всегда перезаписываем временем из события. Для простоты - перезаписываем.
+			invalidationTime := time.Unix(eventData.InvalidationTime, 0)
+			s.invalidatedUsers[eventData.UserID] = invalidationTime
+			s.mu.Unlock()
+			log.Printf("[JWTService] Локальный кэш инвалидации обновлен для UserID %d из Pub/Sub, время: %v", eventData.UserID, invalidationTime)
+		}
+	}
 }
