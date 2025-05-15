@@ -337,7 +337,7 @@ func main() {
 			quizWithID.Use(middleware.ExtractUintParam("id", "quizID")) // Применяем middleware
 			{
 				quizWithID.GET("", quizHandler.GetQuiz)
-				quizzes.GET("/with-questions", quizHandler.GetQuizWithQuestions)
+				quizWithID.GET("/with-questions", quizHandler.GetQuizWithQuestions)
 				quizWithID.GET("/results", quizHandler.GetQuizResults)
 
 				// Маршруты для аутентифицированных пользователей
