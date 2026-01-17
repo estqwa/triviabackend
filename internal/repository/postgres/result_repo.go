@@ -170,9 +170,9 @@ func (r *ResultRepo) GetQuizWinners(quizID uint) ([]entity.Result, error) {
 // FindAndUpdateWinners находит победителей, рассчитывает приз и обновляет их статус в БД ВНУТРИ ПЕРЕДАННОЙ ТРАНЗАКЦИИ.
 // ИЗМЕНЕНО: Принимает транзакцию tx *gorm.DB.
 // ИЗМЕНЕНО: Возвращает слайс ID победителей, приз на человека и ошибку.
-func (r *ResultRepo) FindAndUpdateWinners(tx *gorm.DB, quizID uint, questionCount int, totalPrizeFund int) ([]uint, int, error) {
+func (r *ResultRepo) FindAndUpdateWinners(tx *gorm.DB, quizID uint, questionCount int64, totalPrizeFund int64) ([]uint, int64, error) {
 	var winnerCount int64
-	prizePerWinner := 0
+	var prizePerWinner int64
 	winnerIDs := []uint{} // Инициализируем слайс
 
 	// Шаг 1: Найти ID победителей В ПЕРЕДАННОЙ ТРАНЗАКЦИИ
@@ -190,7 +190,7 @@ func (r *ResultRepo) FindAndUpdateWinners(tx *gorm.DB, quizID uint, questionCoun
 
 	// Шаг 2: Рассчитать приз
 	if winnerCount > 0 && totalPrizeFund > 0 {
-		prizePerWinner = totalPrizeFund / int(winnerCount) // Целочисленное деление
+		prizePerWinner = totalPrizeFund / winnerCount // Целочисленное деление
 	}
 
 	log.Printf("[ResultRepo] FindAndUpdateWinners: Quiz %d, Winners found: %d, Prize per winner: %d (within transaction)", quizID, winnerCount, prizePerWinner)

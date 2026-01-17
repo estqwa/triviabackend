@@ -17,5 +17,5 @@ type ResultRepository interface {
 	GetUserResults(userID uint, limit, offset int) ([]entity.Result, error)
 	CalculateRanks(tx *gorm.DB, quizID uint) error
 	GetQuizWinners(quizID uint) ([]entity.Result, error)
-	FindAndUpdateWinners(tx *gorm.DB, quizID uint, questionCount int, totalPrizeFund int) ([]uint, int, error)
+	FindAndUpdateWinners(tx *gorm.DB, quizID uint, questionCount int64, totalPrizeFund int64) ([]uint, int64, error)
 }

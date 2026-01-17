@@ -398,7 +398,7 @@ func (s *AuthService) RevokeSession(sessionID uint) error {
 		return errors.New("refresh token repository not available")
 	}
 
-	return s.refreshTokenRepo.MarkTokenAsExpiredByID(sessionID)
+	return s.refreshTokenRepo.MarkTokenAsExpiredByID(sessionID, "session_revoked")
 }
 
 // GetRefreshTokenByID получает refresh-токен по его ID
@@ -424,7 +424,7 @@ func (s *AuthService) RevokeSessionByID(sessionID uint, reason string) error {
 	if err != nil {
 		log.Printf("[AuthService] Ошибка отзыва сессии ID=%d через TokenManager: %v", sessionID, err)
 		// Попытаемся пометить как истекший напрямую через репозиторий с причиной
-		if repoErr := s.refreshTokenRepo.MarkTokenAsExpiredByID(sessionID); repoErr != nil {
+		if repoErr := s.refreshTokenRepo.MarkTokenAsExpiredByID(sessionID, reason); repoErr != nil {
 			log.Printf("[AuthService] Ошибка прямой маркировки сессии ID=%d как истекшей: %v", sessionID, repoErr)
 			return fmt.Errorf("ошибка отзыва сессии")
 		}
@@ -449,7 +449,7 @@ func (s *AuthService) RevokeAllUserSessions(userID uint, reason string) error {
 		token.Reason = reason
 		token.IsExpired = true
 
-		err = s.refreshTokenRepo.MarkTokenAsExpiredByID(token.ID)
+		err = s.refreshTokenRepo.MarkTokenAsExpiredByID(token.ID, reason)
 		if err != nil {
 			log.Printf("Ошибка при отзыве сессии ID=%d: %v", token.ID, err)
 			// Продолжаем отзыв других сессий

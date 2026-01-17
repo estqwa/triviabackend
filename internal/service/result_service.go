@@ -119,8 +119,8 @@ func (s *ResultService) CalculateQuizResult(userID, quizID uint) (*entity.Result
 	isEliminated, _ := s.cacheRepo.Exists(eliminationKey)
 
 	// Подсчитываем общий счет и количество правильных ответов
-	totalScore := 0
-	correctAnswers := 0
+	totalScore := int64(0)
+	correctAnswers := int64(0)
 	for _, answer := range userAnswers {
 		totalScore += answer.Score
 		if answer.IsCorrect {
@@ -136,7 +136,7 @@ func (s *ResultService) CalculateQuizResult(userID, quizID uint) (*entity.Result
 		ProfilePicture: user.ProfilePicture,
 		Score:          totalScore,
 		CorrectAnswers: correctAnswers,
-		TotalQuestions: len(quiz.Questions),
+		TotalQuestions: int64(len(quiz.Questions)),
 		IsEliminated:   isEliminated,
 		CompletedAt:    time.Now(),
 	}
@@ -255,7 +255,7 @@ func (s *ResultService) DetermineWinnersAndAllocatePrizes(ctx context.Context, q
 	// Используем общий призовой фонд из конфигурации
 	totalPrizeFund := s.config.TotalPrizeFund
 	var winnerIDs []uint
-	var prizePerWinner int
+	var prizePerWinner int64
 
 	// === Начало транзакции ===
 	tx := s.db.Begin()

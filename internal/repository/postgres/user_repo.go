@@ -123,7 +123,7 @@ func (r *UserRepo) UpdatePassword(userID uint, newPassword string) error {
 }
 
 // UpdateScore обновляет общий счет пользователя
-func (r *UserRepo) UpdateScore(userID uint, score int) error {
+func (r *UserRepo) UpdateScore(userID uint, score int64) error {
 	// Выполняем транзакцию для атомарного обновления
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var user entity.User

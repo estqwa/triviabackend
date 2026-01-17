@@ -381,7 +381,7 @@ func TestQuizManagerWithWebSocketMock(t *testing.T) {
 		// Подготавливаем тестовые данные
 		userID := uint(1)
 		questionID := uint(1)
-		selectedOption := 1
+		selectedOption := int64(1)
 
 		// Создаем собственную реализацию ProcessAnswer
 		processAnswer := func() error {
@@ -390,7 +390,7 @@ func TestQuizManagerWithWebSocketMock(t *testing.T) {
 				ID:            questionID,
 				QuizID:        1,
 				Text:          "Test Question",
-				Options:       []string{"Option 1", "Option 2", "Option 3"},
+				Options:       entity.StringArray{"Option 1", "Option 2", "Option 3"},
 				CorrectOption: selectedOption,
 				TimeLimitSec:  30,
 				PointValue:    10,
@@ -647,7 +647,7 @@ func TestQuizManager_SendsCorrectOptionsFormat(t *testing.T) {
 		ID:      1,
 		QuizID:  1,
 		Text:    "Test Question",
-		Options: []string{"Option 1", "Option 2", "Option 3"}, // Бэкенд хранит как []string
+		Options: entity.StringArray{"Option 1", "Option 2", "Option 3"}, // Бэкенд хранит как []string
 	}
 
 	expectedOptions := []map[string]interface{}{

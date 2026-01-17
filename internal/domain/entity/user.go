@@ -16,11 +16,11 @@ type User struct {
 	Email          string    `gorm:"size:100;not null;unique" json:"email"`
 	Password       string    `gorm:"size:100;not null" json:"-"`
 	ProfilePicture string    `gorm:"size:255" json:"profile_picture"`
-	GamesPlayed    int       `json:"games_played"`
-	TotalScore     int       `json:"total_score"`
-	HighestScore   int       `json:"highest_score"`
-	WinsCount      int       `json:"wins_count"`
-	TotalPrizeWon  int       `json:"total_prize_won"`
+	GamesPlayed    int64     `json:"games_played"`
+	TotalScore     int64     `json:"total_score"`
+	HighestScore   int64     `json:"highest_score"`
+	WinsCount      int64     `json:"wins_count"`
+	TotalPrizeWon  int64     `json:"total_prize_won"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

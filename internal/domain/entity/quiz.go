@@ -11,7 +11,7 @@ type Quiz struct {
 	Description   string     `gorm:"size:500" json:"description"`
 	ScheduledTime time.Time  `gorm:"not null" json:"scheduled_time"`
 	Status        string     `gorm:"size:20;not null" json:"status"` // scheduled, in_progress, completed
-	QuestionCount int        `json:"question_count"`
+	QuestionCount int64      `json:"question_count"`
 	Questions     []Question `gorm:"foreignKey:QuizID" json:"questions,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
