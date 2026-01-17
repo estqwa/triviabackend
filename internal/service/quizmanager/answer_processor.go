@@ -33,7 +33,7 @@ func (ap *AnswerProcessor) ProcessAnswer(
 	ctx context.Context,
 	userID uint,
 	question *entity.Question,
-	selectedOption int,
+	selectedOption int64,
 	timestamp int64,
 	quizState *ActiveQuizState,
 	questionStartTimeMs int64,
@@ -82,7 +82,7 @@ func (ap *AnswerProcessor) ProcessAnswer(
 	}
 
 	// Проверяем лимит времени
-	timeLimitMs := int64(question.TimeLimitSec * 1000)
+	timeLimitMs := question.TimeLimitSec * 1000
 	isTimeLimitExceeded := responseTimeMs > timeLimitMs
 	isReceivedTooLate := serverReceiveTimeMs > (questionStartTimeMs + timeLimitMs)
 	if isReceivedTooLate {

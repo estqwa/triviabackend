@@ -124,7 +124,7 @@ func (qm *QuestionManager) AutoFillQuizQuestions(ctx context.Context, quizID uin
 	}
 
 	// Обновляем счетчик вопросов в викторине
-	quiz.QuestionCount += len(questionsToAdd)
+	quiz.QuestionCount += int64(len(questionsToAdd))
 	if err := qm.deps.QuizRepo.Update(quiz); err != nil {
 		return fmt.Errorf("не удалось обновить счетчик вопросов: %w", err)
 	}

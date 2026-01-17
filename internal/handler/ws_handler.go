@@ -153,7 +153,7 @@ func (h *WSHandler) registerMessageHandlers() {
 	h.wsManager.RegisterHandler("user:answer", func(data json.RawMessage, client *websocket.Client) error {
 		var answerEvent struct {
 			QuestionID     uint  `json:"question_id"`
-			SelectedOption int   `json:"selected_option"`
+			SelectedOption int64 `json:"selected_option"`
 			Timestamp      int64 `json:"timestamp"`
 		}
 		// Ошибка парсинга - фатальна

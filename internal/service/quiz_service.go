@@ -115,7 +115,7 @@ func (s *QuizService) AddQuestions(quizID uint, questions []entity.Question) err
 	}
 
 	// Обновляем количество вопросов в викторине
-	quiz.QuestionCount += len(questions)
+	quiz.QuestionCount += int64(len(questions))
 	return s.quizRepo.Update(quiz)
 }
 
@@ -210,7 +210,7 @@ func (s *QuizService) DuplicateQuiz(originalQuizID uint, newScheduledTime time.T
 		Description:   originalQuiz.Description,
 		ScheduledTime: newScheduledTime,
 		Status:        "scheduled", // Новая викторина всегда запланирована
-		QuestionCount: len(originalQuiz.Questions),
+		QuestionCount: int64(len(originalQuiz.Questions)),
 		// ID, CreatedAt, UpdatedAt будут установлены GORM
 	}
 

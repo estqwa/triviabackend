@@ -56,11 +56,9 @@ func (r *RefreshTokenRepo) GetTokenByValue(tokenValue string) (*entity.RefreshTo
 		return nil, fmt.Errorf("ошибка получения refresh токена по значению: %w", result.Error)
 	}
 
-	// Проверяем срок действия (хотя лучше это делать на уровне сервиса)
-	if token.ExpiresAt.Before(time.Now()) {
-		// TODO: Определить и использовать стандартную ошибку для истекшего токена, например, apperrors.ErrTokenExpired
-		// return nil, errors.New("refresh token expired") // Старый код
-		return nil, apperrors.ErrExpiredToken // Используем новую ошибку
+	// Проверяем срок действия и флаг отзыва
+	if token.IsExpired || token.ExpiresAt.Before(time.Now()) {
+		return nil, apperrors.ErrExpiredToken
 	}
 
 	return &token, nil
@@ -82,7 +80,7 @@ func (r *RefreshTokenRepo) GetTokenByID(tokenID uint) (*entity.RefreshToken, err
 // GetActiveTokensForUser возвращает все активные (не истекшие) refresh-токены для пользователя
 func (r *RefreshTokenRepo) GetActiveTokensForUser(userID uint) ([]*entity.RefreshToken, error) {
 	var tokens []*entity.RefreshToken
-	result := r.db.Where("user_id = ? AND expires_at > ?", userID, time.Now()).
+	result := r.db.Where("user_id = ? AND is_expired = false AND expires_at > ?", userID, time.Now()).
 		Order("created_at DESC"). // Сортируем по дате создания (самые новые первыми)
 		Find(&tokens)
 
@@ -97,7 +95,7 @@ func (r *RefreshTokenRepo) GetActiveTokensForUser(userID uint) ([]*entity.Refres
 func (r *RefreshTokenRepo) CheckToken(tokenValue string) (bool, error) {
 	var count int64
 	result := r.db.Model(&entity.RefreshToken{}).
-		Where("token = ? AND expires_at > ?", tokenValue, time.Now()).
+		Where("token = ? AND is_expired = false AND expires_at > ?", tokenValue, time.Now()).
 		Count(&count)
 
 	if result.Error != nil {
@@ -107,12 +105,15 @@ func (r *RefreshTokenRepo) CheckToken(tokenValue string) (bool, error) {
 }
 
 // MarkTokenAsExpired помечает токен как истекший (устанавливает expires_at в прошлое)
-func (r *RefreshTokenRepo) MarkTokenAsExpired(tokenValue string) error {
+func (r *RefreshTokenRepo) MarkTokenAsExpired(tokenValue string, reason string) error {
+	now := time.Now()
 	// Используем Updates для обновления только определенных полей
 	result := r.db.Model(&entity.RefreshToken{}).
 		Where("token = ?", tokenValue).
 		Updates(map[string]interface{}{ // Используем map для обновления
-			"expires_at": time.Now().Add(-1 * time.Hour), // Устанавливаем время в прошлом
+			"is_expired": true,
+			"revoked_at": now,
+			"reason":     reason,
 		})
 
 	if result.Error != nil {
@@ -128,11 +129,14 @@ func (r *RefreshTokenRepo) MarkTokenAsExpired(tokenValue string) error {
 }
 
 // MarkAllAsExpiredForUser помечает все токены пользователя как истекшие
-func (r *RefreshTokenRepo) MarkAllAsExpiredForUser(userID uint) error {
+func (r *RefreshTokenRepo) MarkAllAsExpiredForUser(userID uint, reason string) error {
+	now := time.Now()
 	result := r.db.Model(&entity.RefreshToken{}).
-		Where("user_id = ? AND expires_at > ?", userID, time.Now()). // Обновляем только активные
-		Updates(map[string]interface{}{                              // Используем map для обновления
-			"expires_at": time.Now().Add(-1 * time.Hour),
+		Where("user_id = ? AND is_expired = false AND expires_at > ?", userID, time.Now()). // Обновляем только активные
+		Updates(map[string]interface{}{                                                     // Используем map для обновления
+			"is_expired": true,
+			"revoked_at": now,
+			"reason":     reason,
 		})
 
 	if result.Error != nil {
@@ -144,8 +148,14 @@ func (r *RefreshTokenRepo) MarkAllAsExpiredForUser(userID uint) error {
 
 // CleanupExpiredTokens удаляет истекшие токены из базы данных
 func (r *RefreshTokenRepo) CleanupExpiredTokens() (int64, error) {
-	// Удаляем токены, срок действия которых истек
-	result := r.db.Where("expires_at <= ?", time.Now()).Delete(&entity.RefreshToken{})
+	now := time.Now()
+	result := r.db.Model(&entity.RefreshToken{}).
+		Where("is_expired = false AND expires_at <= ?", now).
+		Updates(map[string]interface{}{
+			"is_expired": true,
+			"revoked_at": now,
+			"reason":     "expired",
+		})
 	if result.Error != nil {
 		return 0, fmt.Errorf("ошибка очистки истекших refresh токенов: %w", result.Error)
 	}
@@ -157,7 +167,7 @@ func (r *RefreshTokenRepo) CleanupExpiredTokens() (int64, error) {
 func (r *RefreshTokenRepo) CountTokensForUser(userID uint) (int, error) {
 	var count int64
 	result := r.db.Model(&entity.RefreshToken{}).
-		Where("user_id = ? AND expires_at > ?", userID, time.Now()).
+		Where("user_id = ? AND is_expired = false AND expires_at > ?", userID, time.Now()).
 		Count(&count)
 	if result.Error != nil {
 		return 0, fmt.Errorf("ошибка подсчета токенов пользователя %d: %w", userID, result.Error)
@@ -167,7 +177,7 @@ func (r *RefreshTokenRepo) CountTokensForUser(userID uint) (int, error) {
 
 // MarkOldestAsExpiredForUser помечает самые старые активные токены пользователя как истекшие,
 // оставляя указанное количество (`keepCount`).
-func (r *RefreshTokenRepo) MarkOldestAsExpiredForUser(userID uint, keepCount int) error {
+func (r *RefreshTokenRepo) MarkOldestAsExpiredForUser(userID uint, keepCount int, reason string) error {
 	// --- Реализация через два шага GORM --- (Предпочтительнее для чистоты GORM)
 
 	// 1. Найти ID токенов, которые нужно пометить как истекшие.
@@ -175,7 +185,7 @@ func (r *RefreshTokenRepo) MarkOldestAsExpiredForUser(userID uint, keepCount int
 	var tokensToMarkIDs []uint
 	result := r.db.Model(&entity.RefreshToken{}).
 		Select("id"). // Выбираем только ID
-		Where("user_id = ? AND expires_at > ?", userID, time.Now()).
+		Where("user_id = ? AND is_expired = false AND expires_at > ?", userID, time.Now()).
 		Order("created_at ASC"). // Сортируем старые первыми
 		Offset(keepCount).       // Пропускаем `keepCount` самых новых (т.к. сортировка ASC)
 		Find(&tokensToMarkIDs)   // Находим ID остальных (самых старых)
@@ -193,7 +203,9 @@ func (r *RefreshTokenRepo) MarkOldestAsExpiredForUser(userID uint, keepCount int
 	updateResult := r.db.Model(&entity.RefreshToken{}).
 		Where("id IN ?", tokensToMarkIDs).
 		Updates(map[string]interface{}{ // Используем map для обновления
-			"expires_at": time.Now().Add(-1 * time.Hour),
+			"is_expired": true,
+			"revoked_at": time.Now(),
+			"reason":     reason,
 		})
 
 	if updateResult.Error != nil {
@@ -246,12 +258,15 @@ func (r *RefreshTokenRepo) DeleteToken(tokenValue string) error {
 }
 
 // MarkTokenAsExpiredByID помечает токен как истекший по его ID
-func (r *RefreshTokenRepo) MarkTokenAsExpiredByID(id uint) error {
+func (r *RefreshTokenRepo) MarkTokenAsExpiredByID(id uint, reason string) error {
+	now := time.Now()
 	// Используем Updates для обновления только определенных полей по ID
 	result := r.db.Model(&entity.RefreshToken{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{ // Используем map для обновления
-			"expires_at": time.Now().Add(-1 * time.Hour), // Устанавливаем время в прошлом
+			"is_expired": true,
+			"revoked_at": now,
+			"reason":     reason,
 		})
 
 	if result.Error != nil {

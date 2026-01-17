@@ -27,19 +27,19 @@ type RefreshTokenRepository interface {
 	// CheckToken проверяет действительность refresh-токена
 	CheckToken(token string) (bool, error)
 
-	// MarkTokenAsExpired помечает токен как истекший
-	MarkTokenAsExpired(token string) error
+	// MarkTokenAsExpired помечает токен как истекший с указанием причины
+	MarkTokenAsExpired(token string, reason string) error
 
-	// MarkTokenAsExpiredByID помечает токен как истекший по его ID
-	MarkTokenAsExpiredByID(id uint) error
+	// MarkTokenAsExpiredByID помечает токен как истекший по его ID с указанием причины
+	MarkTokenAsExpiredByID(id uint, reason string) error
 
 	// DeleteToken физически удаляет токен по его значению (используется в критических ситуациях)
 	DeleteToken(token string) error
 
-	// MarkAllAsExpiredForUser помечает все токены пользователя как истекшие
-	MarkAllAsExpiredForUser(userID uint) error
+	// MarkAllAsExpiredForUser помечает все токены пользователя как истекшие с указанием причины
+	MarkAllAsExpiredForUser(userID uint, reason string) error
 
-	// CleanupExpiredTokens удаляет все просроченные и истекшие токены
+	// CleanupExpiredTokens помечает все просроченные токены как истекшие
 	CleanupExpiredTokens() (int64, error)
 
 	// GetActiveTokensForUser получает все активные токены пользователя
@@ -49,5 +49,5 @@ type RefreshTokenRepository interface {
 	CountTokensForUser(userID uint) (int, error)
 
 	// MarkOldestAsExpiredForUser помечает самые старые токены пользователя как истекшие, оставляя только limit токенов
-	MarkOldestAsExpiredForUser(userID uint, limit int) error
+	MarkOldestAsExpiredForUser(userID uint, limit int, reason string) error
 }

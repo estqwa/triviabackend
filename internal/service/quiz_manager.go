@@ -253,7 +253,7 @@ func (qm *QuizManager) finishQuiz(quizID uint) {
 
 // ProcessAnswer обрабатывает ответ пользователя, находя соответствующее состояние викторины
 // и делегируя обработку процессору ответов.
-func (qm *QuizManager) ProcessAnswer(userID, questionID uint, selectedOption int, timestamp int64) error {
+func (qm *QuizManager) ProcessAnswer(userID, questionID uint, selectedOption int64, timestamp int64) error {
 	qm.stateMutex.RLock()
 	quizState := qm.activeQuizState
 	qm.stateMutex.RUnlock()

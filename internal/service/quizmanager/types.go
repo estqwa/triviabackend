@@ -13,7 +13,7 @@ import (
 // Constants for default values
 const (
 	DefaultMaxQuizQuestions = 10
-	DefaultTotalPrizeFund   = 1000000 // Пример призового фонда
+	DefaultTotalPrizeFund   = int64(1000000) // Пример призового фонда
 )
 
 // Config содержит настройки для всех компонентов QuizManager
@@ -39,7 +39,7 @@ type Config struct {
 	MaxRetries int
 
 	// Настройки призового фонда
-	TotalPrizeFund int // Общий призовой фонд
+	TotalPrizeFund int64 // Общий призовой фонд
 }
 
 // DefaultConfig возвращает конфигурацию по умолчанию

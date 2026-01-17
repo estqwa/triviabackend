@@ -13,8 +13,8 @@ type QuestionResponse struct {
 	QuizID       uint                    `json:"quiz_id"`
 	Text         string                  `json:"text"`
 	Options      []helper.QuestionOption `json:"options"`
-	TimeLimitSec int                     `json:"time_limit_sec"`
-	PointValue   int                     `json:"point_value"`
+	TimeLimitSec int64                   `json:"time_limit_sec"`
+	PointValue   int64                   `json:"point_value"`
 	CreatedAt    time.Time               `json:"created_at"`
 	UpdatedAt    time.Time               `json:"updated_at"`
 }
@@ -26,7 +26,7 @@ type QuizResponse struct {
 	Description   string             `json:"description,omitempty"`
 	ScheduledTime time.Time          `json:"scheduled_time"`
 	Status        string             `json:"status"`
-	QuestionCount int                `json:"question_count"`
+	QuestionCount int64              `json:"question_count"`
 	Questions     []QuestionResponse `json:"questions,omitempty"` // Слайс DTO вопросов
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
@@ -39,12 +39,12 @@ type ResultResponse struct {
 	QuizID         uint      `json:"quiz_id"`
 	Username       string    `json:"username"`
 	ProfilePicture string    `json:"profile_picture,omitempty"`
-	Score          int       `json:"score"`
-	CorrectAnswers int       `json:"correct_answers"`
-	TotalQuestions int       `json:"total_questions"`
-	Rank           int       `json:"rank"`
+	Score          int64     `json:"score"`
+	CorrectAnswers int64     `json:"correct_answers"`
+	TotalQuestions int64     `json:"total_questions"`
+	Rank           int64     `json:"rank"`
 	IsWinner       bool      `json:"is_winner"`
-	PrizeFund      int       `json:"prize_fund"`
+	PrizeFund      int64     `json:"prize_fund"`
 	IsEliminated   bool      `json:"is_eliminated"`
 	CompletedAt    time.Time `json:"completed_at"`
 }

@@ -36,21 +36,21 @@ type Question struct {
 	QuizID        uint        `gorm:"not null" json:"quiz_id"`
 	Text          string      `gorm:"size:500;not null" json:"text"`
 	Options       StringArray `gorm:"type:jsonb;not null" json:"options"`
-	CorrectOption int         `gorm:"not null" json:"-"` // Скрыто от клиента
-	TimeLimitSec  int         `gorm:"not null" json:"time_limit_sec"`
-	PointValue    int         `gorm:"not null" json:"point_value"`
+	CorrectOption int64       `gorm:"not null" json:"-"` // Скрыто от клиента
+	TimeLimitSec  int64       `gorm:"not null" json:"time_limit_sec"`
+	PointValue    int64       `gorm:"not null" json:"point_value"`
 	CreatedAt     time.Time   `json:"created_at"`
 	UpdatedAt     time.Time   `json:"updated_at"`
 }
 
 // IsCorrect проверяет, является ли выбранный вариант правильным
-func (q *Question) IsCorrect(selectedOption int) bool {
+func (q *Question) IsCorrect(selectedOption int64) bool {
 	return selectedOption == q.CorrectOption
 }
 
 // CalculatePoints рассчитывает очки за ответ на вопрос.
 // ИЗМЕНЕНО: Всегда возвращает 1 за правильный ответ, 0 за неправильный.
-func (q *Question) CalculatePoints(isCorrect bool, responseTimeMs int64) int {
+func (q *Question) CalculatePoints(isCorrect bool, responseTimeMs int64) int64 {
 	if !isCorrect {
 		return 0 // Неправильный ответ - 0 очков
 	}

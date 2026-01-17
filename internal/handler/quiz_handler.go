@@ -108,9 +108,9 @@ type AddQuestionsRequest struct {
 	Questions []struct {
 		Text          string   `json:"text" binding:"required,min=3,max=500"`
 		Options       []string `json:"options" binding:"required,min=2,max=5"`
-		CorrectOption int      `json:"correct_option" binding:"required,min=0"`
-		TimeLimitSec  int      `json:"time_limit_sec" binding:"required,min=5,max=60"`
-		PointValue    int      `json:"point_value" binding:"required,min=1,max=100"`
+		CorrectOption int64    `json:"correct_option" binding:"required,min=0"`
+		TimeLimitSec  int64    `json:"time_limit_sec" binding:"required,min=5,max=60"`
+		PointValue    int64    `json:"point_value" binding:"required,min=1,max=100"`
 	} `json:"questions" binding:"required,min=1"`
 }
 
@@ -127,7 +127,7 @@ func (h *QuizHandler) AddQuestions(c *gin.Context) {
 	// Преобразуем данные в формат для сервиса
 	questions := make([]entity.Question, 0, len(req.Questions))
 	for _, q := range req.Questions {
-		if q.CorrectOption < 0 || q.CorrectOption >= len(q.Options) {
+		if q.CorrectOption < 0 || q.CorrectOption >= int64(len(q.Options)) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid correct_option index %d for question '%s'", q.CorrectOption, q.Text)})
 			return
 		}

@@ -335,7 +335,7 @@ func (m *TokenManager) RefreshTokens(refreshToken, csrfTokenHeader, deviceID, ip
 	}
 
 	// Помечаем старый refresh токен как истекший
-	if err := m.refreshTokenRepo.MarkTokenAsExpired(refreshToken); err != nil {
+	if err := m.refreshTokenRepo.MarkTokenAsExpired(refreshToken, "rotated"); err != nil {
 		log.Printf("[TokenManager] Ошибка при маркировке старого refresh-токена как истекшего (ID: %d): %v", tokenEntity.ID, err)
 		// Не критично, продолжаем
 	}
@@ -408,7 +408,7 @@ func (m *TokenManager) GetTokenInfo(refreshToken string) (*TokenInfo, error) {
 
 // RevokeRefreshToken отзывает (помечает как истекший) указанный refresh токен
 func (m *TokenManager) RevokeRefreshToken(refreshToken string) error {
-	if err := m.refreshTokenRepo.MarkTokenAsExpired(refreshToken); err != nil {
+	if err := m.refreshTokenRepo.MarkTokenAsExpired(refreshToken, "revoked"); err != nil {
 		// Проверяем, была ли ошибка "не найдено"
 		// if errors.Is(err, repository.ErrNotFound) { // Старый код
 		if errors.Is(err, apperrors.ErrNotFound) { // Используем новую ошибку
@@ -431,7 +431,7 @@ func (m *TokenManager) RevokeAllUserTokens(userID uint) error {
 	}
 
 	// Помечаем все refresh-токены пользователя как истекшие
-	if err := m.refreshTokenRepo.MarkAllAsExpiredForUser(userID); err != nil {
+	if err := m.refreshTokenRepo.MarkAllAsExpiredForUser(userID, "logout_all"); err != nil {
 		log.Printf("[TokenManager] Ошибка при отзыве всех refresh-токенов пользователя ID=%d: %v", userID, err)
 		// Даже если произошла ошибка с refresh токенами, пытаемся инвалидировать JWT, если сервис доступен
 		if m.jwtService != nil {
@@ -851,7 +851,7 @@ func (m *TokenManager) limitUserSessions(userID uint) error {
 
 	if count > m.maxRefreshTokensPerUser {
 		log.Printf("[TokenManager] Превышен лимит сессий для пользователя ID=%d (%d > %d). Удаление старых.", userID, count, m.maxRefreshTokensPerUser)
-		if err := m.refreshTokenRepo.MarkOldestAsExpiredForUser(userID, m.maxRefreshTokensPerUser); err != nil {
+		if err := m.refreshTokenRepo.MarkOldestAsExpiredForUser(userID, m.maxRefreshTokensPerUser, "session_limit"); err != nil {
 			return fmt.Errorf("ошибка маркировки старых токенов: %w", err)
 		}
 	}
