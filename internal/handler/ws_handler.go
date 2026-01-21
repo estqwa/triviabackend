@@ -44,14 +44,18 @@ func NewWSHandler(
 }
 
 var upgrader = gorillaws.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  4096, // Увеличено с 1024 для лучшей производительности при 10k+ пользователей
+	WriteBufferSize: 4096, // Увеличено с 1024 для лучшей производительности при 10k+ пользователей
 	CheckOrigin: func(r *http.Request) bool {
-		// В продакшене здесь должна быть проверка допустимых источников
+		// TODO [PRODUCTION]: Реализовать проверку Origin для production!
+		// Текущая реализация небезопасна и допустима только для MVP/локальной разработки.
+		// В production необходимо проверять Origin против списка разрешённых доменов:
+		//   allowedOrigins := []string{"https://yourapp.com", "https://www.yourapp.com"}
+		//   for _, allowed := range allowedOrigins { if origin == allowed { return true } }
+		//   return false
 		origin := r.Header.Get("Origin")
 		log.Printf("WebSocket: checking origin: %s", origin)
-		// Всегда разрешаем для тестирования
-		return true
+		return true // ⚠️ ТОЛЬКО ДЛЯ MVP/ЛОКАЛЬНОЙ РАЗРАБОТКИ!
 	},
 	// Добавляем заголовки для CORS
 	EnableCompression: true,

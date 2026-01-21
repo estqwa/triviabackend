@@ -49,51 +49,6 @@ func NewResultService(
 	}
 }
 
-/*
-// ProcessUserAnswer обрабатывает ответ пользователя на вопрос
-// !!! ЭТА ФУНКЦИЯ НЕ ИСПОЛЬЗУЕТСЯ И ЛОГИКА ДУБЛИРУЕТСЯ/РЕАЛИЗОВАНА В quizmanager.AnswerProcessor !!!
-// !!! КРОМЕ ТОГО, ЛОГИКА РАСЧЕТА ВРЕМЕНИ ОТВЕТА ЗДЕСЬ НЕКОРРЕКТНА ДЛЯ REAL-TIME !!!
-func (s *ResultService) ProcessUserAnswer(userID, quizID, questionID uint, selectedOption int, timestamp int64) (*entity.UserAnswer, error) {
-	// Получаем вопрос
-	question, err := s.questionRepo.GetByID(questionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get question: %w", err)
-	}
-
-	// Проверяем ответ
-	isCorrect := question.IsCorrect(selectedOption)
-	// Некорректный расчет времени для real-time:
-	responseTimeMs := time.Now().UnixMilli() - timestamp // Это время обработки, а не время ответа пользователя
-
-	// Вычисляем очки
-	score := question.CalculatePoints(isCorrect, responseTimeMs)
-
-	// TODO: Добавить логику проверки выбывания (elimination), если она нужна здесь
-	// isEliminated := !isCorrect // Упрощенный пример
-
-	// Создаем запись об ответе
-	userAnswer := &entity.UserAnswer{
-		UserID:            userID,
-		QuizID:            quizID,
-		QuestionID:        questionID,
-		SelectedOption:    selectedOption,
-		IsCorrect:         isCorrect,
-		ResponseTimeMs:    responseTimeMs,
-		Score:             score,
-		// IsEliminated:      isEliminated,
-		// EliminationReason: "",
-		CreatedAt:         time.Now(),
-	}
-
-	// Сохраняем ответ
-	if err := s.resultRepo.SaveUserAnswer(userAnswer); err != nil {
-		return nil, fmt.Errorf("failed to save user answer: %w", err)
-	}
-
-	return userAnswer, nil
-}
-*/
-
 // CalculateQuizResult подсчитывает итоговый результат пользователя в викторине
 func (s *ResultService) CalculateQuizResult(userID, quizID uint) (*entity.Result, error) {
 	// Получаем информацию о пользователе

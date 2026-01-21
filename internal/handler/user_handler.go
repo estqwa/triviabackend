@@ -1,19 +1,16 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/yourusername/trivia-api/internal/service"
-	// Предполагается, что handleQuizError будет перенесен в общий helper или базовый handler
 )
 
 // UserHandler обрабатывает запросы, связанные с пользователями
 type UserHandler struct {
 	userService *service.UserService
-	// Добавьте другие зависимости, если нужно
 }
 
 // NewUserHandler создает новый обработчик пользователей
@@ -44,14 +41,9 @@ func (h *UserHandler) GetLeaderboard(c *gin.Context) {
 	// Вызываем сервис
 	leaderboard, err := h.userService.GetLeaderboard(page, pageSize)
 	if err != nil {
-		// Используем общий обработчик ошибок, если он есть, или стандартный ответ
-		log.Printf("ERROR: Internal server error in UserHandler.GetLeaderboard: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error getting leaderboard"})
-		// TODO: Заменить на вызов общего обработчика ошибок, как в QuizHandler, если он будет
 		return
 	}
 
 	c.JSON(http.StatusOK, leaderboard)
 }
-
-// TODO: Добавить другие методы UserHandler (GetUser, UpdateProfile и т.д.)

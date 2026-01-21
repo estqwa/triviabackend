@@ -13,7 +13,7 @@ type UserRepository interface {
 	Update(user *entity.User) error
 	UpdateProfile(userID uint, updates map[string]interface{}) error
 	UpdatePassword(userID uint, newPassword string) error
-	UpdateScore(userID uint, score int) error
+	UpdateScore(userID uint, score int64) error
 	IncrementGamesPlayed(userID uint) error
 	List(limit, offset int) ([]entity.User, error)
 	// GetLeaderboard возвращает пользователей для лидерборда с пагинацией и общим количеством

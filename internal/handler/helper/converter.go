@@ -2,7 +2,6 @@ package helper
 
 import (
 	"github.com/yourusername/trivia-api/internal/domain/entity"
-	// "github.com/yourusername/trivia-api/internal/handler/dto" // Убираем импорт DTO
 )
 
 // QuestionOption представляет вариант ответа для фронтенда (перенесено из DTO)
@@ -12,6 +11,7 @@ type QuestionOption struct {
 }
 
 // ConvertOptionsToObjects преобразует массив строк в массив объектов с id и text
+// ID использует 0-based индексацию для совместимости с CorrectOption в базе данных
 func ConvertOptionsToObjects(options entity.StringArray) []QuestionOption {
 	converted := make([]QuestionOption, len(options))
 	for i, opt := range options {
@@ -19,7 +19,7 @@ func ConvertOptionsToObjects(options entity.StringArray) []QuestionOption {
 		if opt == "" {
 			opt = "(пустой вариант)"
 		}
-		converted[i] = QuestionOption{ID: i + 1, Text: opt}
+		converted[i] = QuestionOption{ID: i, Text: opt} // 0-based ID для совместимости с CorrectOption
 	}
 	return converted
 }

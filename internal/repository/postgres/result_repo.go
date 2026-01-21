@@ -205,16 +205,24 @@ func (r *ResultRepo) FindAndUpdateWinners(tx *gorm.DB, quizID uint, questionCoun
 			// Не откатываем
 			return nil, 0, err
 		}
-	}
 
-	// Шаг 4: Сбросить статус для не-победителей В ПЕРЕДАННОЙ ТРАНЗАКЦИИ
-	// Обновляем всех, у кого quiz_id совпадает, но user_id нет в списке победителей
-	if err := tx.Model(&entity.Result{}).
-		Where("quiz_id = ? AND user_id NOT IN ?", quizID, winnerIDs).
-		Updates(map[string]interface{}{"is_winner": false, "prize_fund": 0}).Error; err != nil {
-		// Эту ошибку можно залогировать, но не прерывать основной процесс
-		log.Printf("[ResultRepo] WARNING: Error resetting non-winner status for quiz %d within transaction: %v", quizID, err)
-		// Не возвращаем ошибку, т.к. победители уже обновлены
+		// Шаг 4: Сбросить статус для не-победителей В ПЕРЕДАННОЙ ТРАНЗАКЦИИ
+		// CRITICAL FIX: Выполняем только если есть победители, чтобы избежать
+		// проблемы с пустым NOT IN (), который в PostgreSQL обновит ВСЕ записи
+		if err := tx.Model(&entity.Result{}).
+			Where("quiz_id = ? AND user_id NOT IN ?", quizID, winnerIDs).
+			Updates(map[string]interface{}{"is_winner": false, "prize_fund": 0}).Error; err != nil {
+			// Эту ошибку можно залогировать, но не прерывать основной процесс
+			log.Printf("[ResultRepo] WARNING: Error resetting non-winner status for quiz %d within transaction: %v", quizID, err)
+			// Не возвращаем ошибку, т.к. победители уже обновлены
+		}
+	} else {
+		// Если победителей нет, помечаем всех как не-победителей напрямую
+		if err := tx.Model(&entity.Result{}).
+			Where("quiz_id = ?", quizID).
+			Updates(map[string]interface{}{"is_winner": false, "prize_fund": 0}).Error; err != nil {
+			log.Printf("[ResultRepo] WARNING: Error resetting all as non-winners for quiz %d: %v", quizID, err)
+		}
 	}
 
 	// Шаг 5: Возвращаем результат (транзакция коммитится/откатывается снаружи)

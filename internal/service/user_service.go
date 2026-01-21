@@ -64,5 +64,3 @@ func (s *UserService) GetLeaderboard(page, pageSize int) (*dto.PaginatedLeaderbo
 
 	return response, nil
 }
-
-// TODO: Добавить другие методы UserService (GetUserByID, UpdateProfile и т.д.) по мере необходимости

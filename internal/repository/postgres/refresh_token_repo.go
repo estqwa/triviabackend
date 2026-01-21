@@ -7,15 +7,13 @@ import (
 	"time"
 
 	"github.com/yourusername/trivia-api/internal/domain/entity"
-	// "github.com/yourusername/trivia-api/internal/domain/repository" // Удаляем старый импорт
-	apperrors "github.com/yourusername/trivia-api/internal/pkg/errors" // Используем новый пакет ошибок
+	apperrors "github.com/yourusername/trivia-api/internal/pkg/errors"
 	"gorm.io/gorm"
 )
 
 // RefreshTokenRepo реализует интерфейс RefreshTokenRepository с использованием PostgreSQL и GORM
 type RefreshTokenRepo struct {
-	// db *sql.DB // Убираем старое поле
-	db *gorm.DB // Используем GORM DB
+	db *gorm.DB
 }
 
 // NewRefreshTokenRepo создает новый экземпляр RefreshTokenRepo и возвращает ошибку при проблемах
@@ -171,14 +169,15 @@ func (r *RefreshTokenRepo) MarkOldestAsExpiredForUser(userID uint, keepCount int
 	// --- Реализация через два шага GORM --- (Предпочтительнее для чистоты GORM)
 
 	// 1. Найти ID токенов, которые нужно пометить как истекшие.
-	// Сначала получаем все активные токены, сортируем по дате создания (старые первыми)
+	// Получаем активные токены, сортируем по дате создания (новые первыми)
+	// Пропускаем keepCount новых токенов, остальные (старые) помечаем как истекшие
 	var tokensToMarkIDs []uint
 	result := r.db.Model(&entity.RefreshToken{}).
 		Select("id"). // Выбираем только ID
 		Where("user_id = ? AND expires_at > ?", userID, time.Now()).
-		Order("created_at ASC"). // Сортируем старые первыми
-		Offset(keepCount).       // Пропускаем `keepCount` самых новых (т.к. сортировка ASC)
-		Find(&tokensToMarkIDs)   // Находим ID остальных (самых старых)
+		Order("created_at DESC"). // Сортируем новые первыми
+		Offset(keepCount).        // Пропускаем `keepCount` самых новых
+		Find(&tokensToMarkIDs)    // Находим ID остальных (самых старых)
 
 	if result.Error != nil {
 		return fmt.Errorf("ошибка получения ID старых токенов пользователя %d: %w", userID, result.Error)
@@ -202,25 +201,6 @@ func (r *RefreshTokenRepo) MarkOldestAsExpiredForUser(userID uint, keepCount int
 
 	log.Printf("[RefreshTokenRepo] Помечено %d старых токенов как истекшие для пользователя %d", len(tokensToMarkIDs), userID)
 	return nil
-
-	/* --- Старая реализация через database/sql --- (Оставлена для примера, если GORM не справится)
-	query := `
-		UPDATE refresh_tokens
-		SET expires_at = NOW() - INTERVAL '1 hour'
-		WHERE id IN (
-			SELECT id
-			FROM refresh_tokens
-			WHERE user_id = $1 AND expires_at > NOW()
-			ORDER BY created_at ASC
-			OFFSET $2
-		)
-	`
-	_, err := r.db.Exec(query, userID, keepCount)
-	if err != nil {
-		return fmt.Errorf("ошибка маркировки старых токенов пользователя %d: %w", userID, err)
-	}
-	return nil
-	*/
 }
 
 // DeleteToken удаляет refresh токен по его значению

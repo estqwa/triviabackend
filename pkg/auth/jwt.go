@@ -205,9 +205,7 @@ func (s *JWTService) ParseToken(ctx context.Context, tokenString string) (*JWTCu
 		}
 
 		// Запрашиваем карту валидных ключей у KeyProvider
-		// Используем фоновый контекст, т.к. контекст запроса может быть уже отменен
-		// TODO: Пересмотреть использование контекста здесь
-		validationKeys, keyErr := s.keyProvider.GetKeysForValidation(context.Background())
+		validationKeys, keyErr := s.keyProvider.GetKeysForValidation(ctx)
 		if keyErr != nil {
 			log.Printf("[JWT] Ошибка при получении ключей для валидации: %v", keyErr)
 			return nil, fmt.Errorf("failed to get validation keys: %w", keyErr)
@@ -313,23 +311,6 @@ func (s *JWTService) ParseToken(ctx context.Context, tokenString string) (*JWTCu
 			claims.UserID, claims.IssuedAt.Time, invalidationTime)
 		return nil, errors.New("token has been invalidated")
 	}
-
-	// Дополнительная проверка через БД (если не нашли в кеше или просто для надежности)
-	// Эту проверку можно сделать опциональной или убрать, если доверяем кешу + Pub/Sub синхронизации
-	// if s.invalidTokenRepo != nil && claims.IssuedAt != nil {
-	//     isInvalidDB, dbErr := s.invalidTokenRepo.IsTokenInvalid(ctx, claims.UserID, claims.IssuedAt.Time)
-	//     if dbErr != nil {
-	//         log.Printf("WARN: Failed to check token invalidation status in DB for user %d: %v", claims.UserID, dbErr)
-	//         // Не прерываем, но логируем
-	//     } else if isInvalidDB {
-	//         log.Printf("[JWT] Токен инвалидирован (DB check) для пользователя ID=%d, выдан в %v", claims.UserID, claims.IssuedAt.Time)
-	//         // Синхронизируем кеш на всякий случай
-	//         // s.mu.Lock()
-	//         // s.invalidatedUsers[claims.UserID] = time.Now() // Примерное время, лучше брать из БД, если возможно
-	//         // s.mu.Unlock()
-	//         return nil, errors.New("token has been invalidated (db)")
-	//     }
-	// }
 
 	log.Printf("[JWT] Токен успешно проверен для пользователя ID=%d, Email=%s, выдан: %v",
 		claims.UserID, claims.Email, claims.IssuedAt.Time)
@@ -594,14 +575,6 @@ func (s *JWTService) GenerateWSTicket(userID uint, email string) (string, error)
 	log.Printf("[JWT] WS-тикет успешно сгенерирован для пользователя ID=%d с ключом ID=%s, истекает через %v",
 		userID, signingKey.ID, s.wsTicketExpiry)
 	return tokenString, nil
-}
-
-// min возвращает минимальное из двух чисел
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // listenForInvalidationEvents подписывается на события инвалидации из Pub/Sub

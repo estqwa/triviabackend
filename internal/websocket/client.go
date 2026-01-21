@@ -31,11 +31,18 @@ const (
 	// Размер буфера по умолчанию для каналов отправки сообщений клиенту
 	// Увеличено с 64 до 128 для большей устойчивости к пикам
 	defaultClientBufferSize = 128
+
+	// Максимальное количество предупреждений о переполнении буфера до отключения
+	maxBufferWarnings = 3
 )
 
 var (
 	newline = []byte{'\n'}
 	space   = []byte{' '}
+
+	// debugLogging включает подробное логирование для отладки
+	// В production должно быть false
+	debugLogging = false
 )
 
 // ClientConfig содержит настройки для клиента
@@ -259,20 +266,20 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.send:
-			// Сразу после чтения из c.send
-			log.Printf("[Client %s][Conn %s] Dequeued message for writing. Type: %s. Current send buffer len: %d", c.UserID, c.ConnectionID, messageTypeFromBytes(message), len(c.send))
+			// Debug логирование (отключено в production для производительности)
+			if debugLogging {
+				log.Printf("[Client %s][Conn %s] Dequeued message. Type: %s. Buffer len: %d", c.UserID, c.ConnectionID, messageTypeFromBytes(message), len(c.send))
+			}
 
 			// Устанавливаем таймаут для записи
 			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
 				log.Printf("WebSocket Client SetWriteDeadline Error (UserID: %s, ConnID: %s): %v", c.UserID, c.ConnectionID, err)
-				// Ошибку установки дедлайна можно считать фатальной для записи
 				return // Завершаем горутину записи
 			}
 
 			if !ok {
 				// Канал send закрыт (хаб или шард закрыли канал клиента)
 				log.Printf("WebSocket Client Send Channel Closed (UserID: %s, ConnID: %s)", c.UserID, c.ConnectionID)
-				// Отправляем сообщение о закрытии клиенту, если соединение еще открыто
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return // Завершаем горутину записи
 			}
@@ -285,28 +292,20 @@ func (c *Client) writePump() {
 			}
 
 			// Пишем сообщение
-			log.Printf("[Client %s][Conn %s] Attempting WriteMessage. Type: %s", c.UserID, c.ConnectionID, messageTypeFromBytes(message)) // Лог перед записью
 			if _, err := w.Write(message); err != nil {
 				log.Printf("WebSocket Client Write Error (UserID: %s, ConnID: %s): %v", c.UserID, c.ConnectionID, err)
-				// Не выходим сразу, пытаемся закрыть writer
 			}
-
-			// --- НАЧАЛО КОММЕНТИРОВАНИЯ БЛОКА ОПТИМИЗАЦИИ ---
-			// // Добавляем оставшиеся сообщения в очереди в текущее сообщение WebSocket (оптимизация)
-			// n := len(c.send)
-			// for i := 0; i < n; i++ {
-			// 	w.Write(newline)
-			// 	w.Write(<-c.send)
-			// }
-			// --- КОНЕЦ КОММЕНТИРОВАНИЯ БЛОКА ОПТИМИЗАЦИИ ---
 
 			// Закрываем writer, чтобы отправить сообщение
 			if err := w.Close(); err != nil {
 				log.Printf("WebSocket Client Writer Close Error (UserID: %s, ConnID: %s): %v", c.UserID, c.ConnectionID, err)
 				return // Завершаем горутину записи
 			}
-			// Лог после успешной записи
-			log.Printf("[Client %s][Conn %s] Successfully wrote message. Type: %s", c.UserID, c.ConnectionID, messageTypeFromBytes(message))
+
+			// Debug лог после успешной записи
+			if debugLogging {
+				log.Printf("[Client %s][Conn %s] Wrote message. Type: %s", c.UserID, c.ConnectionID, messageTypeFromBytes(message))
+			}
 
 		case <-ticker.C:
 			// Отправляем ping клиенту

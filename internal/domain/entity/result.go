@@ -7,17 +7,23 @@ import (
 // Result представляет итоговый результат участия в викторине
 type Result struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
-	UserID         uint      `gorm:"not null" json:"user_id"`
-	QuizID         uint      `gorm:"not null" json:"quiz_id"`
-	Username       string    `json:"username"`        // Денормализованное поле для оптимизации
-	ProfilePicture string    `json:"profile_picture"` // Денормализованное поле для оптимизации
-	Score          int       `gorm:"not null" json:"score"`
-	CorrectAnswers int       `json:"correct_answers"`
-	TotalQuestions int       `json:"total_questions"`
-	Rank           int       `json:"rank"`
-	IsWinner       bool      `json:"is_winner"`     // Флаг, указывающий, является ли пользователь победителем
-	PrizeFund      int       `json:"prize_fund"`    // Размер доли призового фонда для этого игрока
-	IsEliminated   bool      `json:"is_eliminated"` // Добавленное поле: выбыл ли пользователь во время игры
-	CompletedAt    time.Time `json:"completed_at"`
+	UserID         uint      `gorm:"not null;index;uniqueIndex:idx_user_quiz" json:"user_id"`
+	QuizID         uint      `gorm:"not null;index;uniqueIndex:idx_user_quiz" json:"quiz_id"`
+	Username       string    `gorm:"size:50;not null" json:"username"`
+	ProfilePicture string    `gorm:"size:255;not null;default:''" json:"profile_picture"`
+	Score          int       `gorm:"not null;default:0" json:"score"`
+	CorrectAnswers int       `gorm:"not null;default:0" json:"correct_answers"`
+	TotalQuestions int       `gorm:"not null;default:0" json:"total_questions"`
+	Rank           int       `gorm:"not null;default:0;index:idx_quiz_rank" json:"rank"`
+	IsWinner       bool      `gorm:"not null;default:false" json:"is_winner"`
+	PrizeFund      int       `gorm:"not null;default:0" json:"prize_fund"`
+	IsEliminated   bool      `gorm:"not null;default:false" json:"is_eliminated"`
+	CompletedAt    time.Time `gorm:"not null" json:"completed_at"`
 	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// TableName определяет имя таблицы для GORM
+func (Result) TableName() string {
+	return "results"
 }

@@ -730,7 +730,7 @@ func (h *AuthHandler) RevokeSession(c *gin.Context) {
 // GetSessionLimit возвращает текущий лимит сессий для пользователя
 func (h *AuthHandler) GetSessionLimit(c *gin.Context) {
 	// Получаем ID пользователя из контекста
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Пользователь не аутентифицирован", "error_type": "unauthorized"})
 		return

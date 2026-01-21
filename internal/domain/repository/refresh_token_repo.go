@@ -4,15 +4,6 @@ import (
 	"github.com/yourusername/trivia-api/internal/domain/entity"
 )
 
-// Ошибки репозитория
-var (
-// ErrNotFound возвращается, когда запись не найдена - ПЕРЕНЕСЕНО В internal/pkg/errors
-// ErrNotFound = errors.New("запись не найдена")
-
-// ErrExpiredToken возвращается, когда токен помечен как истекший - ПЕРЕНЕСЕНО В internal/pkg/errors
-// ErrExpiredToken = errors.New("token is expired")
-)
-
 // RefreshTokenRepository интерфейс для работы с refresh-токенами
 type RefreshTokenRepository interface {
 	// CreateToken создает новый refresh-токен и возвращает его ID

@@ -41,7 +41,7 @@ func (r *QuizRepo) GetByID(id uint) (*entity.Quiz, error) {
 // GetActive возвращает активную викторину
 func (r *QuizRepo) GetActive() (*entity.Quiz, error) {
 	var quiz entity.Quiz
-	err := r.db.Where("status = ?", "in_progress").First(&quiz).Error
+	err := r.db.Where("status = ?", entity.QuizStatusInProgress).First(&quiz).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperrors.ErrNotFound
@@ -54,7 +54,7 @@ func (r *QuizRepo) GetActive() (*entity.Quiz, error) {
 // GetScheduled возвращает все запланированные викторины
 func (r *QuizRepo) GetScheduled() ([]entity.Quiz, error) {
 	var quizzes []entity.Quiz
-	err := r.db.Where("status = ? AND scheduled_time > ?", "scheduled", time.Now()).
+	err := r.db.Where("status = ? AND scheduled_time > ?", entity.QuizStatusScheduled, time.Now()).
 		Order("scheduled_time").
 		Find(&quizzes).Error
 	if err != nil {

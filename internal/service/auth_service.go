@@ -16,23 +16,21 @@ import (
 
 // AuthService предоставляет методы для работы с аутентификацией и пользователями
 type AuthService struct {
-	userRepo   repository.UserRepository
-	jwtService *auth.JWTService // Нужен для ParseToken и Invalidate
-	// tokenService     *auth.TokenService             // УДАЛЕНО
-	tokenManager     *manager.TokenManager             // Теперь основная зависимость для токенов
-	refreshTokenRepo repository.RefreshTokenRepository // Оставляем для прямого доступа, если нужно
-	invalidTokenRepo repository.InvalidTokenRepository // Добавляем репозиторий инвалидных токенов
+	userRepo         repository.UserRepository
+	jwtService       *auth.JWTService
+	tokenManager     *manager.TokenManager
+	refreshTokenRepo repository.RefreshTokenRepository
+	invalidTokenRepo repository.InvalidTokenRepository
 }
 
 // NewAuthService создает новый сервис аутентификации и возвращает ошибку при проблемах
 func NewAuthService(
 	userRepo repository.UserRepository,
 	jwtService *auth.JWTService,
-	// tokenService *auth.TokenService, // УДАЛЕНО
-	tokenManager *manager.TokenManager, // ПРИНИМАЕМ TokenManager
+	tokenManager *manager.TokenManager,
 	refreshTokenRepo repository.RefreshTokenRepository,
-	invalidTokenRepo repository.InvalidTokenRepository, // ПРИНИМАЕМ InvalidTokenRepo
-) (*AuthService, error) { // Изменена сигнатура
+	invalidTokenRepo repository.InvalidTokenRepository,
+) (*AuthService, error) {
 	if userRepo == nil {
 		// log.Fatal("UserRepository is required for AuthService")
 		return nil, fmt.Errorf("UserRepository is required for AuthService") // Возвращаем ошибку
@@ -55,13 +53,12 @@ func NewAuthService(
 	}
 
 	return &AuthService{
-		userRepo:   userRepo,
-		jwtService: jwtService,
-		// tokenService:     tokenService, // УДАЛЕНО
-		tokenManager:     tokenManager, // ИСПОЛЬЗУЕМ TokenManager
+		userRepo:         userRepo,
+		jwtService:       jwtService,
+		tokenManager:     tokenManager,
 		refreshTokenRepo: refreshTokenRepo,
 		invalidTokenRepo: invalidTokenRepo,
-	}, nil // Возвращаем сервис и nil ошибку
+	}, nil
 }
 
 // RegisterUser регистрирует нового пользователя

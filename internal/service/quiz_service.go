@@ -51,7 +51,7 @@ func (s *QuizService) CreateQuiz(title, description string, scheduledTime time.T
 		Title:         title,
 		Description:   description,
 		ScheduledTime: scheduledTime,
-		Status:        "scheduled",
+		Status:        entity.QuizStatusScheduled,
 		QuestionCount: 0,
 	}
 
@@ -138,7 +138,7 @@ func (s *QuizService) ScheduleQuiz(quizID uint, scheduledTime time.Time) error {
 	// Если викторина завершена, меняем статус на "scheduled"
 	if quiz.IsCompleted() {
 		fmt.Printf("[QuizService] Изменение статуса викторины ID=%d с 'completed' на 'scheduled'\n", quizID)
-		quiz.Status = "scheduled"
+		quiz.Status = entity.QuizStatusScheduled
 	}
 
 	return s.quizRepo.Update(quiz)
@@ -206,12 +206,11 @@ func (s *QuizService) DuplicateQuiz(originalQuizID uint, newScheduledTime time.T
 
 	// 4. Создать Новую Сущность Викторины
 	newQuiz := &entity.Quiz{
-		Title:         originalQuiz.Title + " (Копия)", // Добавляем пометку к названию
+		Title:         originalQuiz.Title + " (Копия)",
 		Description:   originalQuiz.Description,
 		ScheduledTime: newScheduledTime,
-		Status:        "scheduled", // Новая викторина всегда запланирована
+		Status:        entity.QuizStatusScheduled,
 		QuestionCount: len(originalQuiz.Questions),
-		// ID, CreatedAt, UpdatedAt будут установлены GORM
 	}
 
 	// 5. Начать Транзакцию для атомарного создания викторины и вопросов

@@ -10,14 +10,6 @@ import (
 	"github.com/yourusername/trivia-api/internal/domain/repository"
 )
 
-// ClientStore - определяем интерфейс здесь, если файл interfaces.go не создался
-type ClientStore interface {
-	RegisterClient(client *Client)
-	UnregisterClient(client *Client)
-	Broadcast(message []byte)
-	ClientCount() int
-}
-
 // Shard представляет подмножество клиентов Hub
 // Каждый шард обрабатывает свою группу клиентов независимо,
 // что значительно улучшает производительность при большом числе соединений
@@ -230,10 +222,9 @@ func (s *Shard) handleBroadcast(message []byte) {
 
 			// Увеличиваем счетчик и проверяем порог
 			newCount := client.incrementBufferWarningCount()
-			const maxWarnings = 3 // Порог отключения
 
-			if newCount >= maxWarnings {
-				log.Printf("[Shard %d] Client %s (Conn: %s) exceeded max buffer warnings (%d). Unregistering.", s.id, client.UserID, client.ConnectionID, maxWarnings)
+			if newCount >= maxBufferWarnings {
+				log.Printf("[Shard %d] Client %s (Conn: %s) exceeded max buffer warnings (%d). Unregistering.", s.id, client.UserID, client.ConnectionID, maxBufferWarnings)
 				// Отключаем клиента, если превышен порог
 				s.clients.Delete(client)
 
@@ -258,12 +249,12 @@ func (s *Shard) handleBroadcast(message []byte) {
 				s.metrics.mu.Unlock()
 			} else {
 				// Отправляем предупреждение клиенту
-				log.Printf("[Shard %d] Sending buffer warning %d/%d to client %s (Conn: %s)", s.id, newCount, maxWarnings, client.UserID, client.ConnectionID)
+				log.Printf("[Shard %d] Sending buffer warning %d/%d to client %s (Conn: %s)", s.id, newCount, maxBufferWarnings, client.UserID, client.ConnectionID)
 				warningMsg := map[string]interface{}{
 					"type": "server:buffer_warning",
 					"data": map[string]interface{}{
 						"warning_count": newCount,
-						"max_warnings":  maxWarnings,
+						"max_warnings":  maxBufferWarnings,
 						"message":       "Your connection is slow or buffer is full. You may be disconnected soon.",
 					},
 				}
@@ -572,10 +563,9 @@ func (s *Shard) SendToUser(userID string, message []byte) bool {
 		log.Printf("[Shard %d] Client %s (Conn: %s) buffer full on direct message. Current warning count: %d", s.id, userID, client.ConnectionID, client.getBufferWarningCount())
 
 		newCount := client.incrementBufferWarningCount()
-		const maxWarnings = 3
 
-		if newCount >= maxWarnings {
-			log.Printf("[Shard %d] Client %s (Conn: %s) exceeded max buffer warnings (%d) on direct message. Unregistering.", s.id, client.UserID, client.ConnectionID, maxWarnings)
+		if newCount >= maxBufferWarnings {
+			log.Printf("[Shard %d] Client %s (Conn: %s) exceeded max buffer warnings (%d) on direct message. Unregistering.", s.id, client.UserID, client.ConnectionID, maxBufferWarnings)
 			// Отключаем клиента, если превышен порог
 			s.clients.Delete(client)
 
@@ -601,12 +591,12 @@ func (s *Shard) SendToUser(userID string, message []byte) bool {
 			return false // Сообщение не доставлено, клиент отключен
 		} else {
 			// Отправляем предупреждение
-			log.Printf("[Shard %d] Sending buffer warning %d/%d to client %s (Conn: %s) on direct message", s.id, newCount, maxWarnings, client.UserID, client.ConnectionID)
+			log.Printf("[Shard %d] Sending buffer warning %d/%d to client %s (Conn: %s) on direct message", s.id, newCount, maxBufferWarnings, client.UserID, client.ConnectionID)
 			warningMsg := map[string]interface{}{
 				"type": "server:buffer_warning",
 				"data": map[string]interface{}{
 					"warning_count": newCount,
-					"max_warnings":  maxWarnings,
+					"max_warnings":  maxBufferWarnings,
 					"message":       "Your connection is slow or buffer is full. You may be disconnected soon.",
 				},
 			}

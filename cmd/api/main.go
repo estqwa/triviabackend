@@ -203,33 +203,7 @@ func main() {
 		}
 	}()
 
-	// --- Инициализация WebSocket ---
-	// var wsHub ws.HubInterface // УДАЛЯЕМ ЭТУ СТРОКУ, ТАК КАК wsHub УЖЕ ОПРЕДЕЛЕН ВЫШЕ
-	// var pubSubProvider ws.PubSubProvider = &ws.NoOpPubSub{} // УДАЛЯЕМ ЭТУ СТРОКУ, ТАК КАК pubSubProvider УЖЕ ОПРЕДЕЛЕН ВЫШЕ
-
-	// Создаем PubSubProvider только если кластеризация включена
-	// if cfg.WebSocket.Cluster.Enabled { // УДАЛЯЕМ ВЕСЬ ЭТОТ БЛОК, ТАК КАК ОН УЖЕ ЕСТЬ ВЫШЕ
-	// 	log.Println("Инициализация Redis PubSub для кластеризации WebSocket...")
-	// 	// Создаем КЛИЕНТ Redis PubSub с использованием той же универсальной функции
-	// 	redisPubSubClient, errPubSub := database.NewUniversalRedisClient(cfg.Redis) // Используем отдельную переменную для ошибки
-	// 	if errPubSub != nil {
-	// 		log.Printf("Ошибка при инициализации Redis клиента для PubSub: %v. Кластеризация WS будет неактивна.", errPubSub)
-	// 		// Используем NoOpPubSub если не удалось подключиться к Redis
-	// 		pubSubProvider = &ws.NoOpPubSub{}
-	// 	} else {
-	// 		// Создаем провайдер Redis PubSub, передавая ему созданный клиент
-	// 		redisProvider, errProv := ws.NewRedisPubSub(redisPubSubClient)
-	// 		if errProv != nil {
-	// 			log.Printf("Ошибка при создании Redis PubSub провайдера: %v. Кластеризация WS будет неактивна.", errProv)
-	// 			redisPubSubClient.Close() // Закрываем созданный клиент, так как он не будет использоваться
-	// 			pubSubProvider = &ws.NoOpPubSub{}
-	// 		} else {
-	// 			log.Println("Redis PubSub провайдер успешно инициализирован")
-	// 			pubSubProvider = redisProvider
-	// 		}
-	// 	}
-	// } // КОНЕЦ УДАЛЯЕМОГО БЛОКА
-
+	// Инициализация WebSocket Hub
 	if cfg.WebSocket.Sharding.Enabled {
 		log.Println("WebSocket: включено шардирование")
 		// Передаем конфигурацию WebSocket, PubSubProvider и CacheRepo в ShardedHub
@@ -388,10 +362,12 @@ func main() {
 		}
 	}()
 
-	// Настраиваем HTTP сервер
+	// Настраиваем HTTP сервер с тайм-аутами для защиты от slow client attacks
 	srv := &http.Server{
-		Addr:    ":" + cfg.Server.Port,
-		Handler: router,
+		Addr:         ":" + cfg.Server.Port,
+		Handler:      router,
+		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
 	}
 
 	// Запускаем сервер в горутине

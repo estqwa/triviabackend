@@ -26,19 +26,13 @@ func (r *QuestionRepo) Create(question *entity.Question) error {
 
 // CreateBatch создает пакет вопросов
 func (r *QuestionRepo) CreateBatch(questions []entity.Question) error {
-	// Принудительно указываем кодировку UTF-8 для операции
-	tx := r.db.Exec("SET CLIENT_ENCODING TO 'UTF8'").Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-
-	err := tx.Create(&questions).Error
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-
-	return tx.Commit().Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// Устанавливаем кодировку UTF-8 внутри транзакции
+		if err := tx.Exec("SET CLIENT_ENCODING TO 'UTF8'").Error; err != nil {
+			return err
+		}
+		return tx.Create(&questions).Error
+	})
 }
 
 // GetByID возвращает вопрос по ID
@@ -65,12 +59,44 @@ func (r *QuestionRepo) GetByQuizID(quizID uint) ([]entity.Question, error) {
 }
 
 // GetRandomQuestions возвращает случайные вопросы из базы данных
+// Оптимизировано для производительности при больших объёмах данных
 func (r *QuestionRepo) GetRandomQuestions(limit int) ([]entity.Question, error) {
 	var questions []entity.Question
-	err := r.db.Order("RANDOM()").Limit(limit).Find(&questions).Error
-	if err != nil {
-		return nil, err
+
+	// Используем TABLESAMPLE для O(1) производительности вместо ORDER BY RANDOM()
+	// SYSTEM выбирает случайные страницы данных, что намного быстрее при большом количестве записей
+	// Берём больше записей, чем нужно (limit*3), затем перемешиваем и обрезаем,
+	// т.к. TABLESAMPLE может вернуть меньше записей, чем ожидается
+	sql := `
+		SELECT * FROM questions 
+		TABLESAMPLE SYSTEM_ROWS(?)
+		ORDER BY RANDOM()
+		LIMIT ?
+	`
+
+	// Запрашиваем с запасом, чтобы гарантировать достаточное количество
+	sampleSize := limit * 3
+	if sampleSize < 100 {
+		sampleSize = 100 // Минимальный размер выборки
 	}
+
+	err := r.db.Raw(sql, sampleSize, limit).Scan(&questions).Error
+	if err != nil {
+		// Fallback на старый метод, если TABLESAMPLE не поддерживается или пустой результат
+		err = r.db.Order("RANDOM()").Limit(limit).Find(&questions).Error
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Если TABLESAMPLE вернул пустой результат (маленькая таблица), используем fallback
+	if len(questions) == 0 {
+		err = r.db.Order("RANDOM()").Limit(limit).Find(&questions).Error
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return questions, nil
 }
 

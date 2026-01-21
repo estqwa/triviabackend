@@ -6,8 +6,8 @@ type LeaderboardUserDTO struct {
 	UserID         uint   `json:"user_id"`         // ID пользователя
 	Username       string `json:"username"`        // Имя пользователя
 	ProfilePicture string `json:"profile_picture"` // Аватар пользователя
-	WinsCount      int    `json:"wins_count"`      // Количество побед
-	TotalPrizeWon  int    `json:"total_prize_won"` // Общая сумма выигранных призов
+	WinsCount      int64  `json:"wins_count"`      // Количество побед
+	TotalPrizeWon  int64  `json:"total_prize_won"` // Общая сумма выигранных призов
 }
 
 // PaginatedLeaderboardResponse представляет пагинированный ответ для лидерборда

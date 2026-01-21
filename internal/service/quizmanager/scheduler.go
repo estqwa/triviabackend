@@ -59,7 +59,7 @@ func (s *Scheduler) ScheduleQuiz(ctx context.Context, quizID uint, scheduledTime
 
 	// Устанавливаем время запуска
 	quiz.ScheduledTime = scheduledTime
-	quiz.Status = "scheduled"
+	quiz.Status = entity.QuizStatusScheduled
 
 	// Сохраняем изменения
 	if err := s.deps.QuizRepo.Update(quiz); err != nil {
@@ -106,7 +106,7 @@ func (s *Scheduler) CancelQuiz(quizID uint) error {
 	}
 
 	// Обновляем статус в БД
-	if err := s.deps.QuizRepo.UpdateStatus(quizID, "cancelled"); err != nil {
+	if err := s.deps.QuizRepo.UpdateStatus(quizID, entity.QuizStatusCancelled); err != nil {
 		return err
 	}
 
@@ -298,9 +298,7 @@ func (s *Scheduler) triggerCountdown(ctx context.Context, quiz *entity.Quiz) {
 				"quiz_id":      quiz.ID,
 				"seconds_left": secondsLeft,
 			}
-			// s.deps.WSManager.BroadcastEventToQuiz(quiz.ID, "quiz:countdown", countdownData)
-			// Используем новую сигнатуру
-			fullEvent := map[string]interface{}{ // Или websocket.Event
+			fullEvent := map[string]interface{}{
 				"type": "quiz:countdown",
 				"data": countdownData,
 			}
@@ -318,7 +316,7 @@ func (s *Scheduler) triggerQuizStart(ctx context.Context, quiz *entity.Quiz) {
 	log.Printf("[Scheduler] Запуск викторины #%d", quiz.ID)
 
 	// Обновляем статус викторины в БД
-	if err := s.deps.QuizRepo.UpdateStatus(quiz.ID, "in_progress"); err != nil {
+	if err := s.deps.QuizRepo.UpdateStatus(quiz.ID, entity.QuizStatusInProgress); err != nil {
 		log.Printf("[Scheduler] Ошибка при обновлении статуса викторины #%d на in_progress: %v", quiz.ID, err)
 		// Продолжаем, т.к. отмена уже невозможна
 	}
@@ -329,9 +327,7 @@ func (s *Scheduler) triggerQuizStart(ctx context.Context, quiz *entity.Quiz) {
 		"title":          quiz.Title,
 		"question_count": quiz.QuestionCount,
 	}
-	// s.deps.WSManager.BroadcastEventToQuiz(quiz.ID, "quiz:start", startEvent)
-	// Используем новую сигнатуру
-	fullEvent := map[string]interface{}{ // Или websocket.Event
+	fullEvent := map[string]interface{}{
 		"type": "quiz:start",
 		"data": startEvent,
 	}

@@ -179,6 +179,31 @@ func (m *MockManager) HandleMessage(message []byte, client *websocket.Client) {
 	m.Called(message, client)
 }
 
+// BroadcastEventToQuiz отправляет событие всем клиентам конкретной викторины
+func (m *MockManager) BroadcastEventToQuiz(quizID uint, event interface{}) error {
+	if m.t != nil {
+		m.t.Logf("[WebSocket] Broadcast события в викторину %d: %+v", quizID, event)
+	}
+	args := m.Called(quizID, event)
+	err := args.Error(0)
+	if err != nil && m.t != nil {
+		m.t.Logf("[WebSocket ERROR] BroadcastEventToQuiz для викторины %d завершился с ошибкой: %v", quizID, err)
+	}
+	return err
+}
+
+// GetActiveSubscribers возвращает список активных подписчиков викторины
+func (m *MockManager) GetActiveSubscribers(quizID uint) ([]uint, error) {
+	if m.t != nil {
+		m.t.Logf("[WebSocket] Получение подписчиков викторины %d", quizID)
+	}
+	args := m.Called(quizID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]uint), args.Error(1)
+}
+
 // Мок для результатов
 type MockResultRepository struct {
 	mock.Mock
@@ -283,6 +308,8 @@ func (m *MockQuestionRepository) Update(question *entity.Question) error {
 type WebSocketInterface interface {
 	BroadcastEvent(eventType string, data interface{}) error
 	SendEventToUser(userID string, eventType string, data interface{}) error
+	BroadcastEventToQuiz(quizID uint, event interface{}) error
+	GetActiveSubscribers(quizID uint) ([]uint, error)
 }
 
 // WebSocketAdapterForTest адаптирует наш мок к интерфейсу WebSocketInterface
@@ -298,6 +325,16 @@ func (a *WebSocketAdapterForTest) BroadcastEvent(eventType string, data interfac
 // SendEventToUser делегирует вызов в MockManager
 func (a *WebSocketAdapterForTest) SendEventToUser(userID string, eventType string, data interface{}) error {
 	return a.Mock.SendEventToUser(userID, eventType, data)
+}
+
+// BroadcastEventToQuiz делегирует вызов в MockManager
+func (a *WebSocketAdapterForTest) BroadcastEventToQuiz(quizID uint, event interface{}) error {
+	return a.Mock.BroadcastEventToQuiz(quizID, event)
+}
+
+// GetActiveSubscribers делегирует вызов в MockManager
+func (a *WebSocketAdapterForTest) GetActiveSubscribers(quizID uint) ([]uint, error) {
+	return a.Mock.GetActiveSubscribers(quizID)
 }
 
 // TestQuizManagerWithWebSocketInterface улучшаем с assert и детальными сообщениями
@@ -353,6 +390,54 @@ func TestQuizManagerWithWebSocketInterface(t *testing.T) {
 		assert.Error(t, err, "BroadcastEvent должен вернуть ошибку при симуляции сбоя")
 		assert.Equal(t, expectedError.Error(), err.Error(),
 			fmt.Sprintf("Неправильный текст ошибки. Ожидалось: %v, получено: %v", expectedError, err))
+		mockWSManager.AssertExpectations(t)
+	})
+
+	t.Run("BroadcastEventToQuiz delegates to MockManager", func(t *testing.T) {
+		// Настройка мока для BroadcastEventToQuiz
+		quizID := uint(42)
+		event := map[string]interface{}{
+			"type": "quiz:question",
+			"data": map[string]interface{}{"question_id": 1, "text": "Test question"},
+		}
+		mockWSManager.On("BroadcastEventToQuiz", quizID, event).Return(nil).Once()
+
+		// Вызов метода через адаптер
+		err := adapter.BroadcastEventToQuiz(quizID, event)
+
+		// Проверка результатов
+		assert.NoError(t, err, "BroadcastEventToQuiz не должен возвращать ошибку")
+		mockWSManager.AssertExpectations(t)
+	})
+
+	t.Run("BroadcastEventToQuiz handles errors correctly", func(t *testing.T) {
+		// Настройка мока с возвращением ошибки
+		quizID := uint(42)
+		event := map[string]interface{}{"type": "quiz:error"}
+		expectedError := errors.New("broadcast to quiz failed")
+		mockWSManager.On("BroadcastEventToQuiz", quizID, event).Return(expectedError).Once()
+
+		// Вызов метода через адаптер
+		err := adapter.BroadcastEventToQuiz(quizID, event)
+
+		// Проверка результатов
+		assert.Error(t, err, "BroadcastEventToQuiz должен вернуть ошибку")
+		assert.Equal(t, expectedError.Error(), err.Error())
+		mockWSManager.AssertExpectations(t)
+	})
+
+	t.Run("GetActiveSubscribers returns subscriber list", func(t *testing.T) {
+		// Настройка мока
+		quizID := uint(42)
+		expectedSubscribers := []uint{1, 2, 3, 4, 5}
+		mockWSManager.On("GetActiveSubscribers", quizID).Return(expectedSubscribers, nil).Once()
+
+		// Вызов метода через адаптер
+		subscribers, err := adapter.GetActiveSubscribers(quizID)
+
+		// Проверка результатов
+		assert.NoError(t, err, "GetActiveSubscribers не должен возвращать ошибку")
+		assert.Equal(t, expectedSubscribers, subscribers, "Список подписчиков должен совпадать")
 		mockWSManager.AssertExpectations(t)
 	})
 }

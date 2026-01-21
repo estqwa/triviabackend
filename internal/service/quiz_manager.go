@@ -33,9 +33,6 @@ type QuizManager struct {
 	// Контекст для управления жизненным циклом
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	// Зависимости
-	// deps *quizmanager.Dependencies
 }
 
 // NewQuizManager создает новый экземпляр менеджера викторин
@@ -184,7 +181,7 @@ func (qm *QuizManager) finishQuiz(quizID uint) {
 
 	// Обновляем статус викторины
 	quiz := qm.activeQuizState.Quiz
-	quiz.Status = "completed"
+	quiz.Status = entity.QuizStatusCompleted
 	// Для timestamp завершения используем текущее время
 	completedAt := time.Now()
 

@@ -13,9 +13,8 @@ import (
 
 // AuthMiddleware обеспечивает аутентификацию для защищенных маршрутов
 type AuthMiddleware struct {
-	jwtService *auth.JWTService
-	// tokenService *auth.TokenService    // УДАЛЕНО: Устаревшее поле
-	tokenManager *manager.TokenManager // Новый менеджер токенов
+	jwtService   *auth.JWTService
+	tokenManager *manager.TokenManager
 }
 
 // NewAuthMiddlewareWithManager создает новый middleware с использованием TokenManager
@@ -85,8 +84,8 @@ func (m *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 		c.Set("user_id", claims.UserID)
 		c.Set("email", claims.Email)
 
-		// Для администраторов добавляем флаг is_admin на основе проверки ID
-		// (в будущих версиях это можно заменить на проверку claims.Role)
+		// TODO [PRODUCTION]: Реализовать систему ролей вместо hardcoded ID == 1
+		// Добавить поле role/is_admin в entity.User и включать его в JWT claims
 		if claims.UserID == 1 {
 			c.Set("is_admin", true)
 		}
@@ -109,7 +108,7 @@ func (m *AuthMiddleware) AdminOnly() gin.HandlerFunc {
 		// Проверяем, является ли пользователь администратором
 		isAdmin, exists := c.Get("is_admin")
 		if !exists || !isAdmin.(bool) {
-			// Для обратной совместимости также проверяем по ID
+			// TODO [PRODUCTION]: Заменить на проверку роли вместо hardcoded ID == 1
 			if userID.(uint) != 1 {
 				c.JSON(http.StatusForbidden, gin.H{"error": "Admin rights required"})
 				c.Abort()
@@ -208,7 +207,7 @@ func (m *AuthMiddleware) RequireCSRF() gin.HandlerFunc {
 
 		// 4. Сравниваем секрет из cookie и секрет из JWT
 		if csrfSecretCookie != csrfSecretJWT {
-			log.Printf("[CSRF Middleware] Ошибка: Несовпадение CSRF секрета! Cookie: '%s', JWT: '%s'", csrfSecretCookie, csrfSecretJWT)
+			log.Printf("[CSRF Middleware] CSRF secret mismatch for user %d, path %s", claims.UserID, c.Request.URL.Path)
 			c.JSON(http.StatusForbidden, gin.H{"error": "CSRF secret mismatch (cookie vs token)", "error_type": "csrf_secret_mismatch"})
 			c.Abort()
 			return
@@ -220,10 +219,10 @@ func (m *AuthMiddleware) RequireCSRF() gin.HandlerFunc {
 
 		// 6. Сравниваем хеш из заголовка с ожидаемым хешом
 		if csrfTokenHeader != expectedTokenHash {
-			log.Printf("[CSRF Middleware] Ошибка: Несовпадение CSRF токена (хеша)! Header: '%s', Expected: '%s'", csrfTokenHeader, expectedTokenHash)
-			// Минимальное логирование в production
 			if gin.Mode() == gin.ReleaseMode {
-				log.Printf("[CSRF Middleware] Invalid CSRF token received for user %d", claims.UserID)
+				log.Printf("[CSRF Middleware] Invalid CSRF token for user %d", claims.UserID)
+			} else {
+				log.Printf("[CSRF Middleware] CSRF token mismatch for user %d, path %s", claims.UserID, c.Request.URL.Path)
 			}
 			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid CSRF token (hash mismatch)", "error_type": "csrf_token_invalid"})
 			c.Abort()
@@ -231,19 +230,9 @@ func (m *AuthMiddleware) RequireCSRF() gin.HandlerFunc {
 		}
 
 		// 7. CSRF проверка пройдена
-		log.Printf("[CSRF Middleware] CSRF проверка пройдена для пользователя ID=%d, метод %s, путь %s", claims.UserID, method, c.Request.URL.Path)
-		c.Next()
-	}
-}
-
-// LogRequestInfo добавляет информацию о запросе в логи
-func (m *AuthMiddleware) LogRequestInfo() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Логируем информацию о запросе
-		// Это может быть полезно для отладки
-		// Например, логирование IP-адреса, User-Agent и т.д.
-
-		// Передаем управление следующему middleware
+		if gin.Mode() != gin.ReleaseMode {
+			log.Printf("[CSRF Middleware] CSRF check passed for user %d, %s %s", claims.UserID, method, c.Request.URL.Path)
+		}
 		c.Next()
 	}
 }

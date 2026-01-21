@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/spf13/viper"
@@ -208,20 +209,22 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// 6. Логирование для проверки (опционально, можно убрать после отладки)
-	log.Printf("--- Загруженные значения конфигурации ---")
-	log.Printf("Database Host: %s", cfg.Database.Host)
-	log.Printf("Database Port: %s", cfg.Database.Port)
-	log.Printf("Database User: %s", cfg.Database.User)
-	log.Printf("Database Name: %s", cfg.Database.DBName)
-	log.Printf("Database SSLMode: %s", cfg.Database.SSLMode)
-	log.Printf("Redis Addr: %s", cfg.Redis.Addr)
-	log.Printf("Redis Mode: %s", cfg.Redis.Mode)
-	log.Printf("JWT Expiration Hours: %d", cfg.JWT.ExpirationHrs)
-	log.Printf("DB JWT Key Encryption Key Set: %t", cfg.JWT.DBJWTKeyEncryptionKey != "")
-	log.Printf("Server Port: %s", cfg.Server.Port)
-	log.Printf("Websocket Cluster Enabled: %t", cfg.WebSocket.Cluster.Enabled)
-	log.Printf("-----------------------------------------")
+	// 6. Логирование конфигурации (только в debug режиме)
+	if os.Getenv("GIN_MODE") != "release" {
+		log.Printf("--- Загруженные значения конфигурации ---")
+		log.Printf("Database Host: %s", cfg.Database.Host)
+		log.Printf("Database Port: %s", cfg.Database.Port)
+		log.Printf("Database User: %s", cfg.Database.User)
+		log.Printf("Database Name: %s", cfg.Database.DBName)
+		log.Printf("Database SSLMode: %s", cfg.Database.SSLMode)
+		log.Printf("Redis Addr: %s", cfg.Redis.Addr)
+		log.Printf("Redis Mode: %s", cfg.Redis.Mode)
+		log.Printf("JWT Expiration Hours: %d", cfg.JWT.ExpirationHrs)
+		log.Printf("DB JWT Key Encryption Key Set: %t", cfg.JWT.DBJWTKeyEncryptionKey != "")
+		log.Printf("Server Port: %s", cfg.Server.Port)
+		log.Printf("Websocket Cluster Enabled: %t", cfg.WebSocket.Cluster.Enabled)
+		log.Printf("-----------------------------------------")
+	}
 
 	// 7. Проверка обязательных параметров
 	if cfg.JWT.DBJWTKeyEncryptionKey == "" {
