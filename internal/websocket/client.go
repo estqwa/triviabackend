@@ -92,6 +92,9 @@ type Client struct {
 	// Уменьшен размер буфера с 256 до 64 для экономии памяти
 	send chan []byte
 
+	// Флаг, указывающий что канал send закрыт (для предотвращения panic)
+	sendClosed atomic.Bool
+
 	// Время последней активности клиента
 	lastActivity time.Time
 
@@ -488,6 +491,22 @@ func (c *Client) getBufferWarningCount() int32 {
 	c.bufferWarningMutex.Lock()
 	defer c.bufferWarningMutex.Unlock()
 	return c.bufferWarningCount
+}
+
+// CloseSend безопасно закрывает канал send (только один раз)
+// Использует atomic CompareAndSwap для предотвращения panic при повторном закрытии
+// Возвращает true, если канал был закрыт этим вызовом, false если уже был закрыт
+func (c *Client) CloseSend() bool {
+	if c.sendClosed.CompareAndSwap(false, true) {
+		close(c.send)
+		return true
+	}
+	return false // Канал уже был закрыт ранее
+}
+
+// IsSendClosed проверяет, закрыт ли канал send
+func (c *Client) IsSendClosed() bool {
+	return c.sendClosed.Load()
 }
 
 // --- Конец новых методов ---

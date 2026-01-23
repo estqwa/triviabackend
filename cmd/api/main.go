@@ -232,6 +232,23 @@ func main() {
 	// Инициализируем роутер Gin
 	router := gin.Default()
 
+	// Настройка доверенных прокси для корректной работы c.ClientIP()
+	// В production (GIN_MODE=release): не доверяем прокси (защита от IP spoofing)
+	// В development: доверяем localhost
+	// При деплое на VM с load balancer: добавьте IP балансировщика в список
+	if isProduction {
+		// Production: не доверять прокси-заголовкам
+		// Если используете load balancer, замените nil на []string{"IP_БАЛАНСИРОВЩИКА"}
+		if err := router.SetTrustedProxies(nil); err != nil {
+			log.Printf("Warning: failed to set trusted proxies: %v", err)
+		}
+	} else {
+		// Development: доверяем localhost
+		if err := router.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil {
+			log.Printf("Warning: failed to set trusted proxies: %v", err)
+		}
+	}
+
 	// Настройка CORS
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"https://triviafront.vercel.app", "https://triviafrontadmin.vercel.app", "http://localhost:5173", "http://localhost:8000", "http://localhost:3000"},

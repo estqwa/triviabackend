@@ -115,7 +115,7 @@ func (s *Shard) handleRegister(client *Client) {
 				if oldClient.conn != nil {
 					oldClient.conn.Close()
 				}
-				close(oldClient.send)
+				oldClient.CloseSend() // Безопасное закрытие канала
 
 				s.metrics.mu.Lock()
 				s.metrics.activeConnections--
@@ -164,9 +164,8 @@ func (s *Shard) handleUnregister(client *Client) {
 		if client.conn != nil {
 			client.conn.Close()
 		}
-		// Закрываем канал отправки только после завершения всех операций
-		// чтобы избежать паники при отправке в закрытый канал
-		close(client.send)
+		// Безопасно закрываем канал отправки
+		client.CloseSend()
 
 		// Обновляем метрики
 		s.metrics.mu.Lock()
@@ -238,7 +237,7 @@ func (s *Shard) handleBroadcast(message []byte) {
 				if client.conn != nil {
 					client.conn.Close()
 				}
-				close(client.send)
+				client.CloseSend() // Безопасное закрытие канала
 
 				// Обновляем метрики
 				s.metrics.mu.Lock()
@@ -528,7 +527,7 @@ func (s *Shard) cleanupAllClients() {
 		if client.conn != nil {
 			client.conn.Close()
 		}
-		close(client.send)
+		client.CloseSend() // Безопасное закрытие канала
 
 		s.clients.Delete(client)
 		return true
@@ -579,7 +578,7 @@ func (s *Shard) SendToUser(userID string, message []byte) bool {
 			if client.conn != nil {
 				client.conn.Close()
 			}
-			close(client.send)
+			client.CloseSend() // Безопасное закрытие канала
 
 			// Обновляем метрики
 			s.metrics.mu.Lock()

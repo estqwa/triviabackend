@@ -322,15 +322,14 @@ func (h *ShardedHub) SendAlert(alertType AlertType, severity AlertSeverity, mess
 	}
 }
 
-// Run запускает все шарды и кластерный компонент
+// Run запускает кластерный компонент и ждет завершения
+// ВАЖНО: Шарды уже запущены в NewShardedHub, здесь НЕ запускаем их повторно!
 func (h *ShardedHub) Run() {
 	log.Printf("ShardedHub: запуск с %d шардами, до %d клиентов на шард",
 		h.shardCount, h.maxClientsPerShard)
 
-	// Запускаем все шарды
-	for _, shard := range h.shards {
-		go shard.Run()
-	}
+	// Шарды уже запущены в NewShardedHub, не запускаем повторно!
+	// Это исправляет баг двойного запуска из Codex Audit
 
 	// Запускаем сбор метрик
 	go h.collectMetrics()

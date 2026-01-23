@@ -47,15 +47,32 @@ var upgrader = gorillaws.Upgrader{
 	ReadBufferSize:  4096, // Увеличено с 1024 для лучшей производительности при 10k+ пользователей
 	WriteBufferSize: 4096, // Увеличено с 1024 для лучшей производительности при 10k+ пользователей
 	CheckOrigin: func(r *http.Request) bool {
-		// TODO [PRODUCTION]: Реализовать проверку Origin для production!
-		// Текущая реализация небезопасна и допустима только для MVP/локальной разработки.
-		// В production необходимо проверять Origin против списка разрешённых доменов:
-		//   allowedOrigins := []string{"https://yourapp.com", "https://www.yourapp.com"}
-		//   for _, allowed := range allowedOrigins { if origin == allowed { return true } }
-		//   return false
 		origin := r.Header.Get("Origin")
-		log.Printf("WebSocket: checking origin: %s", origin)
-		return true // ⚠️ ТОЛЬКО ДЛЯ MVP/ЛОКАЛЬНОЙ РАЗРАБОТКИ!
+
+		// Если Origin пустой - это не браузерный клиент (мобильное приложение, curl и т.д.)
+		// Разрешаем такие подключения
+		if origin == "" {
+			return true
+		}
+
+		// Список разрешенных origin (синхронизирован с CORS в main.go)
+		// При добавлении новых доменов - добавьте их также в CORS config
+		allowedOrigins := []string{
+			"https://triviafront.vercel.app",
+			"https://triviafrontadmin.vercel.app",
+			"http://localhost:5173",
+			"http://localhost:8000",
+			"http://localhost:3000",
+		}
+
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				return true
+			}
+		}
+
+		log.Printf("WebSocket: rejected unauthorized origin: %s", origin)
+		return false
 	},
 	// Добавляем заголовки для CORS
 	EnableCompression: true,
@@ -65,7 +82,7 @@ var upgrader = gorillaws.Upgrader{
 func (h *WSHandler) HandleConnection(c *gin.Context) {
 	// Получаем тикет из запроса (?ticket=... а не ?token=...)
 	ticket := c.Query("ticket")
-	log.Printf("WebSocket: received ticket: %s", ticket)
+	// НЕ логируем тикет - это секретные данные аутентификации
 
 	if ticket == "" {
 		// Попробуем также проверить параметр 'token' для обратной совместимости, если нужно

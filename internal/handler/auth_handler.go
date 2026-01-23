@@ -206,6 +206,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 // RefreshToken обновляет access токен с помощью refresh токена
 // Обновлено: использует TokenManager, получает refresh из куки, csrf из заголовка
+// Добавлена проверка CSRF с использованием Double Submit Cookie
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	// Получаем refresh токен из HttpOnly куки
 	refreshToken, err := h.tokenManager.GetRefreshTokenFromCookie(c.Request)
@@ -221,14 +222,30 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
+	// Получаем CSRF секрет из HttpOnly cookie для проверки
+	csrfSecret, err := h.tokenManager.GetCSRFSecretFromCookie(c.Request)
+	if err != nil {
+		log.Printf("[AuthHandler] RefreshToken: ошибка получения CSRF секрета из cookie: %v", err)
+		h.handleAuthError(c, manager.NewTokenError(manager.InvalidCSRFToken, "CSRF secret cookie missing or invalid", nil))
+		return
+	}
+
+	// Вычисляем ожидаемый хеш из секрета
+	expectedHash := manager.HashCSRFSecret(csrfSecret)
+
+	// Сравниваем хеш из заголовка с ожидаемым хешом (Double Submit Cookie)
+	if csrfTokenHeader != expectedHash {
+		log.Printf("[AuthHandler] RefreshToken: CSRF hash mismatch")
+		h.handleAuthError(c, manager.NewTokenError(manager.InvalidCSRFToken, "Invalid CSRF token", nil))
+		return
+	}
+
 	// Используем IP и UserAgent из запроса
 	ipAddress := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 	deviceID := "" // Пока используем пустой
 
 	// Используем обновленный AuthService.RefreshTokens
-	// ПРИМЕЧАНИЕ: csrfTokenHeader здесь передается, но в новой логике он не используется внутри RefreshTokens
-	// Проверка CSRF должна выполняться в middleware ДО вызова этого хендлера
 	tokenResp, err := h.authService.RefreshTokens(refreshToken, csrfTokenHeader, deviceID, ipAddress, userAgent)
 	if err != nil {
 		h.handleAuthError(c, err)
