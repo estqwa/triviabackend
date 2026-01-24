@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # Backend API
   app:
     build:
       context: .
@@ -14,8 +15,27 @@ services:
       - app-network
     environment:
       - GIN_MODE=release
+      - REDIS_URL=redis:6379
+      - DB_HOST=postgres
+      # Add other necessary env vars here or use .env file
     volumes:
       - ./config:/root/config
+
+  # Frontend Next.js
+  frontend:
+    build:
+      context: ../trivia-apinewfront # Assuming folder structure
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://34.159.126.18:8080
+    ports:
+      - "80:3000" # Expose Frontend on port 80 (HTTP standard)
+    networks:
+      - app-network
+    environment:
+        # Client-side env vars must start with NEXT_PUBLIC_
+      - NEXT_PUBLIC_API_URL=http://34.159.126.18:8080 # User's External IP
+    restart: always
 
   postgres:
     image: postgres:13-alpine
