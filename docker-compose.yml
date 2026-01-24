@@ -17,6 +17,8 @@ services:
       - GIN_MODE=release
       - REDIS_URL=redis:6379
       - DB_HOST=postgres
+      - DB_JWT_KEY_ENCRYPTION_KEY=a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff00
+      - DATABASE_PASSWORD=123456
       # Add other necessary env vars here or use .env file
     volumes:
       - ./config:/root/config
@@ -33,7 +35,7 @@ services:
     networks:
       - app-network
     environment:
-        # Client-side env vars must start with NEXT_PUBLIC_
+      # Client-side env vars must start with NEXT_PUBLIC_
       - NEXT_PUBLIC_API_URL=http://34.159.126.18:8080 # User's External IP
     restart: always
 
